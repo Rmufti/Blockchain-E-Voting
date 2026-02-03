@@ -62,3 +62,4 @@ Security & Integrity
 - Endorsement Policy: Every vote requires a digital signature from both Org1 (Election Admin) and Org2 (Registrar). This ensures that no single entity can manipulate the tally.
 - Voter Anonymity: To protect privacy, the system utilizes a "Two-Step" commit. Step 1 marks the user as VOTED in the UserContract. Step 2 adds an anonymous credit to the ElectionContract. There is no direct database link between the two.
 - Attribute Verification: Using the CID (Client Identity) library, the contract automatically rejects any user who does not have the correct faculty or enrolled attribute in their X.509 certificate.
+
