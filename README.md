@@ -1,6 +1,6 @@
 # Blockchain-E-Voting
 
-Organizations (MSPs)
+##Organizations (MSPs)
 Org1: UWO-SystemMSP (Platform & Election Admin)
 
 Role: The dual-purpose organization acting as both the System Architect and the Election Commission.
