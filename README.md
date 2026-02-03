@@ -1,17 +1,20 @@
 # Blockchain-E-Voting
 
+How to run: see [HOW-TO-RUN.md](HOW-TO-RUN.md) for frontend, backend, blockchain, and database.
+
+---
 
 Organizations (MSPs)
 
 Org1: UWO-SystemMSP (Platform & Election Admin)
 - Role: The dual-purpose organization acting as both the System Architect and the Election Commission.
-- Operations: * Manages the blockchain network infrastructure (Orderers and Peers).
+- Operations: Manages the blockchain network infrastructure (Orderers and Peers).
 - Defines and manages elections (Create Ballots, Register Candidates).
 - Controls the lifecycle of the smart contracts.
 
 Org2: UWO-RegistrarMSP (Identity Registrar)
 - Role: The trusted "Source of Truth" for student and faculty identities.
-- Operations: * Registers Students and Faculty members.
+- Operations: Registers Students and Faculty members.
 - Verifies student credentials (e.g., verifying that Rameez is an active student).
 - Assigns attributes like faculty and role to user certificates for access control.
 
