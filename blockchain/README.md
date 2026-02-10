@@ -39,14 +39,14 @@ Builds the Docker image
 Installs chaincode on peers
 Starts chaincode containers automatically
 
-'''bash
+```bash
 ./network.sh deployCCAAS -ccn testchaincode -ccp ../asset-transfer-basic/chaincode-javascript/
 
-'''
+```
 Verify Deployment
-'''bash
+```bash
 docker ps
-'''
+```
 You should see containers similar to:
 peer0org1_testchaincode_ccaas
 peer0org2_testchaincode_ccaas
@@ -54,7 +54,7 @@ peer0org2_testchaincode_ccaas
 
 
 ##Phase 4
-'''bash
+```bash
 export PATH=${PWD}/../bin:$PATH
 export FABRIC_CFG_PATH=$PWD/../config/
 
@@ -63,10 +63,10 @@ export CORE_PEER_LOCALMSPID="Org1MSP"
 export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
 export CORE_PEER_ADDRESS=localhost:7051
-'''
+```
 
 ##Phase 5 (Test Votes and Ballots)
-'''bash
+```bash
 peer chaincode invoke \
   -o localhost:7050 \
   --ordererTLSHostnameOverride orderer.example.com \
@@ -79,19 +79,19 @@ peer chaincode invoke \
   --peerAddresses localhost:9051 \
   --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
   -c '{"function":"CastVotes","Args":["Student_001","Candidate_Alice"]}'
-'''
+```
 Output
-'''bash
+```bash
 Chaincode invoke successful. result: status:200
-'''
+```
 
 Verify Ledger
-'''bash
+```bash
 peer chaincode query \
   -C mychannel \
   -n testchaincode \
   -c '{"function":"ReadAsset","Args":["Student_001"]}'
-'''
+```
 
 
 
