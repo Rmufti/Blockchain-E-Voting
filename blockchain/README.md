@@ -114,3 +114,11 @@ Suggested structure:
 - `config/` – connection profiles, channel config (optional, or in backend)
 
 After merging, document in this README how to deploy and run the network (e.g. scripts, Docker Compose) and which env vars the backend needs.
+
+# CouchDB Check
+
+http://localhost:5984/_utils
+
+Username: admin
+
+Password: adminpw
