@@ -29,7 +29,7 @@ Whenever you want to reset everything and start fresh, run the following:
 ./network.sh down
 
 # Start the network, create a channel, and enable Certificate Authorities
-./network.sh up createChannel -c mychannel -ca
+./network.sh up createChannel -c mychannel -ca -s couchdb
 ```
 
 ## Phase 3: Build & Deploy the Chaincode
