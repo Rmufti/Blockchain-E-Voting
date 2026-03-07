@@ -63,7 +63,7 @@ export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.examp
 export CORE_PEER_ADDRESS=localhost:7051
 ```
 
-##Phase 5: Build Ballot Box
+## Phase 5: Build Ballot Box
 ```bash
 peer chaincode invoke \
   -o localhost:7050 \
