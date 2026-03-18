@@ -4,7 +4,7 @@
 begin;
 
 create extension if not exists "pgcrypto";
-
+c
 create table if not exists users (
   user_id uuid primary key default gen_random_uuid(),
   student_number text not null unique,
