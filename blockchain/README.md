@@ -29,7 +29,7 @@ Whenever you want to reset everything and start fresh, run the following:
 ./network.sh down
 
 # Start the network, create a channel, and enable Certificate Authorities
-./network.sh up createChannel -c mychannel -ca
+./network.sh up createChannel -c mychannel -ca -s couchdb
 ```
 
 ## Phase 3: Build & Deploy the Chaincode
@@ -39,34 +39,32 @@ Builds the Docker image
 Installs chaincode on peers
 Starts chaincode containers automatically
 
-'''bash
+```bash
 ./network.sh deployCCAAS -ccn testchaincode -ccp ../asset-transfer-basic/chaincode-javascript/
 
-'''
+```
 Verify Deployment
-'''bash
+```bash
 docker ps
-'''
+```
 You should see containers similar to:
 peer0org1_testchaincode_ccaas
 peer0org2_testchaincode_ccaas
 
 
-
-##Phase 4
-'''bash
+## Phase 4: Connect Paths
+```bash
 export PATH=${PWD}/../bin:$PATH
 export FABRIC_CFG_PATH=$PWD/../config/
-
 export CORE_PEER_TLS_ENABLED=true
 export CORE_PEER_LOCALMSPID="Org1MSP"
 export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
 export CORE_PEER_ADDRESS=localhost:7051
-'''
+```
 
-##Phase 5 (Test Votes and Ballots)
-'''bash
+## Phase 5: Build Ballot Box
+```bash
 peer chaincode invoke \
   -o localhost:7050 \
   --ordererTLSHostnameOverride orderer.example.com \
@@ -78,20 +76,22 @@ peer chaincode invoke \
   --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
   --peerAddresses localhost:9051 \
   --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
-  -c '{"function":"CastVotes","Args":["Student_001","Candidate_Alice"]}'
-'''
+  -c '{"function":"InitElection","Args":["election1", "Student Council 2024"]}'
+```
+
+
 Output
-'''bash
+```bash
 Chaincode invoke successful. result: status:200
-'''
+```
 
 Verify Ledger
-'''bash
+```bash
 peer chaincode query \
   -C mychannel \
   -n testchaincode \
-  -c '{"function":"ReadAsset","Args":["Student_001"]}'
-'''
+  -c '{"function":"getVote","Args":["election1", "Student_001"]}'
+```
 
 
 
@@ -110,3 +110,11 @@ Suggested structure:
 - `config/` – connection profiles, channel config (optional, or in backend)
 
 After merging, document in this README how to deploy and run the network (e.g. scripts, Docker Compose) and which env vars the backend needs.
+
+# CouchDB Check
+
+http://localhost:5984/_utils
+
+Username: admin
+
+Password: adminpw
