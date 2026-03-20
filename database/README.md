@@ -2,9 +2,8 @@
 
 ## Overview
 
-This project uses **MongoDB Atlas** (cloud-hosted) for user authentication data.
-The database stores sign-in information only — all election data, ballots, and vote
-tallies live on the blockchain.
+This project now uses **MongoDB Atlas** (cloud-hosted) for user authentication data.
+The database stores sign-in information only — all election data, ballots, and vote tallies live on the blockchain.
 
 ## What's stored in MongoDB
 
@@ -27,12 +26,18 @@ tallies live on the blockchain.
    ```
    Then edit `.env` with your actual `MONGODB_URI`.
 
-2. Install dependencies:
+   ```bash
+   MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/evoting?appName=Cluster0
+   ```
+   Ask for the connection string I will give it. This will grant you the connection needed.
+
+
+3. Install dependencies:
    ```bash
    npm install
    ```
 
-3. Run the seed script to populate test users:
+4. Run the seed script to populate test users:
    ```bash
    npm run seed
    ```
@@ -49,11 +54,11 @@ tallies live on the blockchain.
 The backend connects using the `MONGODB_URI` environment variable.
 Connection string format:
 ```
-mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/evoting?retryWrites=true&w=majority
+mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/evoting?appName=Cluster0
 ```
 
 ## Notes
 
-- Passwords are hashed with bcrypt (12 salt rounds)
-- The old PostgreSQL schema has been removed — MongoDB is the sole database
-- Election-related data is handled by the blockchain layer, not this database
+- Passwords are hashed with bcrypt (12 rounds, used an online generator for it)
+- MongoDB is the sole database, not PostgreSQL so changed were made
+- As Rameez said: Election-related data is not in this database
