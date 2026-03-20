@@ -1,15 +1,59 @@
-# Database
+# Database — Blockchain E-Voting
 
-Place database schemas, migrations, and seed data here.
+## Overview
 
-Merge points:
-- Backend connects to the DB. Use an env variable (e.g. `DATABASE_URL`) in the backend for the connection string; do not hardcode it.
-- This folder is for schema definitions and migration scripts only; the backend owns the actual driver and queries. Keep table/column names and types documented here so backend and blockchain teams can align (e.g. user id, election id, ballot token storage).
-- If the ledger is the source of truth for votes, document what is stored in the DB vs on-chain (e.g. users, sessions, audit logs) to avoid duplication and merge conflicts.
+This project uses **MongoDB Atlas** (cloud-hosted) for user authentication data.
+The database stores sign-in information only — all election data, ballots, and vote
+tallies live on the blockchain.
 
-Suggested structure:
-- `migrations/` – versioned schema changes (e.g. SQL or ORM migrations)
-- `schema/` – current schema or ER diagram (optional)
-- `seeds/` – dev/test seed data (optional)
+## What's stored in MongoDB
 
-After merging, add a short note in this README on how to run migrations and what the backend expects (e.g. DB name, required tables).
+| Field         | Type   | Description                    |
+|---------------|--------|--------------------------------|
+| email         | String | User email (unique)            |
+| password      | String | Bcrypt-hashed password         |
+| fullName      | String | User's full name               |
+| studentNumber | String | Student number (unique)        |
+| faculty       | String | Faculty name                   |
+| role          | String | `admin` or `student`           |
+| createdAt     | Date   | Auto-generated timestamp       |
+| updatedAt     | Date   | Auto-generated timestamp       |
+
+## Setup
+
+1. Copy the env template and fill in the Atlas connection string:
+   ```bash
+   cp .env.example .env
+   ```
+   Then edit `.env` with your actual `MONGODB_URI`.
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Run the seed script to populate test users:
+   ```bash
+   npm run seed
+   ```
+
+## Test Accounts
+
+| Role    | Email              | Password    |
+|---------|--------------------|-------------|
+| Admin   | fjones5@uwo.ca     | password123 |
+| Student | jfrancis3@uwo.ca   | password456 |
+
+## Connection
+
+The backend connects using the `MONGODB_URI` environment variable.
+Connection string format:
+```
+mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/evoting?retryWrites=true&w=majority
+```
+
+## Notes
+
+- Passwords are hashed with bcrypt (12 salt rounds)
+- The old PostgreSQL schema has been removed — MongoDB is the sole database
+- Election-related data is handled by the blockchain layer, not this database

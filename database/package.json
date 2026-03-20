@@ -1,0 +1,13 @@
+{
+  "name": "evoting-database",
+  "version": "1.0.0",
+  "description": "MongoDB setup and seed scripts for the Blockchain E-Voting system",
+  "scripts": {
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "dotenv": "^16.4.7",
+    "mongoose": "^8.9.5"
+  }
+}
