@@ -13,3 +13,9 @@ Suggested structure:
 - Config (e.g. port, DB URL, blockchain gateway) via environment variables
 
 Keep API request/response shapes consistent with the frontend so the existing `api.js` client works with minimal changes.
+
+
+
+
+npm install jsonwebtoken bcryptjs
+npm install express cors dotenv
