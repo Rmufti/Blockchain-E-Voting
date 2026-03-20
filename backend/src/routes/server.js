@@ -4,8 +4,8 @@
 
 //const express = require('express');
 const cors = require('cors');
-const { submitVoteTransaction } = require('./services/fabricService');
-const { verifyVoterEligibility, recordVoteReceipt } = require('./db.js'); // Adjust the path as needed
+const { submitVoteTransaction } = require('../services/fabricService.js');
+const { verifyVoterEligibility, recordVoteReceipt } = require('../db.js'); // Adjust the path as needed
 
 // 1. IMPORT standard tools: express and cors
 // 2. IMPORT your blockchain function: { submitVoteTransaction } from './services/fabricService'
