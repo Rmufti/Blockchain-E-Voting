@@ -1,65 +1,84 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+// db.js
+const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
 
-// 1. Initialize the connection
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+const userSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  fullName: String,
+  studentNumber: String,
+  faculty: String,
+  role: { type: String, default: 'student' },
+  enrollment_status: { type: String, default: 'active' }
 });
 
-// Test the connection
-pool.connect()
-    .then(() => console.log('✅ Connected to PostgreSQL Database'))
-    .catch(err => console.error('❌ PostgreSQL Connection Error', err.stack));
+const User = mongoose.model('User', userSchema);
 
-/**
- * GATEKEEPER CHECK: Verifies the student exists and hasn't voted in this election yet.
- */
+// Vote receipt schema
+const voteReceiptSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  electionId: { type: String, required: true },
+  voteData: { type: Object, required: true },
+  transactionId: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now }
+});
+
+const VoteReceipt = mongoose.model('VoteReceipt', voteReceiptSchema);
+
+// Connect to MongoDB
+async function connectDB() {
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGO_URI or MONGODB_URI not defined in .env');
+
+  return mongoose.connect(uri);
+}
+
+// Create user
+async function createUser({ email, password, fullName, studentNumber, faculty, role }) {
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const user = new User({
+    email,
+    password: hashedPassword,
+    fullName,
+    studentNumber,
+    faculty,
+    role
+  });
+  await user.save();
+  return user._id;
+}
+
+// Find user by email
+async function findUserByEmail(email) {
+  return User.findOne({ email });
+}
+
+// Verify voter eligibility
 async function verifyVoterEligibility(studentNumber, electionId) {
-    // 1. Check if user exists
-    const userRes = await pool.query(
-        'SELECT user_id, enrollment_status FROM users WHERE student_number = $1',
-        [studentNumber]
-    );
-
-    if (userRes.rows.length === 0) {
-        throw new Error('Student number not found in the system.');
-    }
-
-    const user = userRes.rows[0];
-
-    if (user.enrollment_status !== 'active') {
-        throw new Error('Student is not actively enrolled.');
-    }
-
-    // 2. Check if they already voted in this specific election
-    const ballotRes = await pool.query(
-        'SELECT ballot_id FROM ballots WHERE user_id = $1 AND election_id = $2',
-        [user.user_id, electionId]
-    );
-
-    if (ballotRes.rows.length > 0) {
-        throw new Error('This student has already cast a vote for this election.');
-    }
-
-    // If they pass all checks, return the internal user_id
-    return user.user_id;
+  const user = await User.findOne({ studentNumber, enrollment_status: 'active' });
+  if (!user) {
+    throw new Error('Unauthorized: Active student number not found in the system.');
+  }
+  return user._id;
 }
 
-/**
- * RECEIPT GENERATOR: Saves the blockchain transaction ID to the DB.
- */
-async function recordVoteReceipt(userId, electionId, rankingJson, blockchainTxId) {
-    await pool.query(
-        `INSERT INTO ballots (election_id, user_id, ranking_json, blockchain_tx_id) 
-         VALUES ($1, $2, $3, $4)`,
-        [electionId, userId, JSON.stringify(rankingJson), blockchainTxId]
-    );
-    return true;
+// Record vote receipt
+async function recordVoteReceipt(userId, electionId, voteData, transactionId) {
+  const receipt = new VoteReceipt({
+    userId,
+    electionId,
+    voteData,
+    transactionId
+  });
+  await receipt.save();
+  return receipt._id;
 }
 
-// Export everything so server.js can use it
 module.exports = {
-    pool,
-    verifyVoterEligibility,
-    recordVoteReceipt
+  connectDB,
+  createUser,
+  findUserByEmail,
+  verifyVoterEligibility,
+  recordVoteReceipt,
+  User
 };

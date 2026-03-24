@@ -1,8 +1,8 @@
 import axios from 'axios'
 import { useAuth } from '../context/AuthContext'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'false'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001'
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
 // Create axios instance
 const api = axios.create({

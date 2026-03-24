@@ -53,4 +53,13 @@ async function submitVoteTransaction(electionId, voterId, candidateId) {
     }
 }
 
-module.exports = { submitVoteTransaction };
+// Alias for getContract to return just the contract
+async function getFabricContract() {
+    const { contract } = await getContract();
+    return contract;
+}
+
+module.exports = {
+    submitVoteTransaction,
+    getFabricContract
+};

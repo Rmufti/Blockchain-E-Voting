@@ -1,18 +1,26 @@
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
 
-module.exports= (req , res, next)=>{
-    const token = req.headers.authorization;
+module.exports = function authMiddleware(req, res, next) {
+  const authHeader = req.headers['authorization'];
 
-    if(!token){
-        return res.status(401).json({ message: 'No token provided' });
-    }
+  if (!authHeader) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
 
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.userId = decoded.userId;
-        req.roles = decoded.roles;
-        next();
-    } catch (err) {
-        return res.status(401).json({ message: 'Invalid token' });
-    }
-}
+  const token = authHeader.split(' ')[1]; // expects 'Bearer <token>'
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secretkey');
+    req.userId = decoded.userId;
+    req.role = decoded.role; // ✅ match what we send in login
+    req.roles = Array.isArray(decoded.roles)
+      ? decoded.roles
+      : decoded.role
+      ? [decoded.role]
+      : [];
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Token invalid or expired' });
+  }
+};

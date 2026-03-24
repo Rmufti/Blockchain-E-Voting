@@ -112,7 +112,7 @@ const AdminPage = () => {
 
         {/* Action Cards */}
         <Grid container spacing={3}>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <ActionCard
               icon={<SettingsIcon />}
               title="Manage Elections"
@@ -120,29 +120,21 @@ const AdminPage = () => {
               onClick={() => navigate('/admin/elections')}
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <ActionCard
-              icon={<PersonAddIcon />}
-              title="Manage Candidates"
-              description="Review and approve candidate applications"
-              onClick={() => navigate('/admin/candidates')}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <ActionCard
-              icon={<VerifiedUserIcon />}
-              title="Verify Voters"
-              description="Review and verify voter registrations"
-              onClick={() => navigate('/admin/voters')}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <ActionCard
               icon={<AssessmentIcon />}
               title="View Results"
               description="Monitor election results and analytics"
               onClick={handleViewResults}
               highlighted={!!currentElectionId}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <ActionCard
+              icon={<BarChartIcon />}
+              title="Statistics"
+              description="View detailed voting statistics and reports"
+              onClick={() => alert('Statistics page coming soon!')}
             />
           </Grid>
         </Grid>
