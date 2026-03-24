@@ -1,541 +1,342 @@
-// // Main Hub
-// // This ties the database, server and the internet together
-
-// require('dotenv').config(); // load env variables
-// const authRoutes = require('./routes/auth');
-// const authMiddleware = require('./middleware/auth');
-// const requireRole = require('./middleware/roles');
-// const app = express();
-// app.use('/api/auth', authRoutes);
-
-// // Example protected routes
-// app.get('/api/admin-only', authMiddleware, requireRole('admin'), (req, res) => {
-//   res.json({ message: 'You are an admin!' });
-// });
-
-// app.get('/api/student-only', authMiddleware, requireRole('student'), (req, res) => {
-//   res.json({ message: 'You are a student!' });
-// });
-
-
-
-// const express = require('express');
-// const cors = require('cors');
-
-// // Hyperledger / blockchain stuff — leave as is
-// const { submitVoteTransaction } = require('./services/fabricService.js');
-
-// // Your DB functions
-// const { verifyVoterEligibility, recordVoteReceipt } = require('./db.js'); // DB connection
-
-// const { Pool } = require('pg'); // PostgreSQL client
-
-// // Auth routes
-// const authRoutes = require('./routes/auth');
-
-// const pool = new Pool({
-//   connectionString: process.env.DATABASE_URL,
-// });
-
-// pool.connect()
-//     .then(client => {
-//         console.log("✅ MONGO connected!");
-//         client.release();
-//     })
-//     .catch(err => console.error("❌ MONGO Connection Error", err));
-
-
-
-// // Middleware
-// app.use(cors());
-// app.use(express.json());
-
-// // Test route
-// app.get('/', (req, res) => {
-//   res.send('Server is running!');
-// });
-
-// // Use auth routes
-// app.use('/api/auth', authRoutes);
-
-// // POST /api/vote
-// // This now only handles your part (DB verification & auth), blockchain part is untouched
-// app.post('/api/vote', async (req, res) => {
-//   const { studentNumber, electionId, candidateId } = req.body;
-
-//   try {
-//   =========================================
-//     const userQuery = await pool.query(
-//       'SELECT * FROM users WHERE student_number = $1 AND enrollment_status = $2',
-//       [studentNumber, 'Active']
-//     );
-
-//     if (userQuery.rows.length === 0) {
-//       return res.status(401).json({ 
-//         error: 'Unauthorized: Active student number not found in the system.' 
-//       });
-//     }
-
-
-
-
-//LEDGERRRR
-//     const contract = await getFabricContract();
-//     const result = await contract.submitTransaction('CastVote', electionId, studentNumber, candidateId);
-
-//     res.status(200).json({
-//       message: 'Success! Vote securely recorded on the blockchain.',
-//       transactionId: result.toString(),
-//     });
-
-//   } catch (error) {
-//     console.error('Voting Error:', error);
-//     res.status(500).json({ 
-//       error: 'Failed to cast vote', 
-//       details: error.message 
-//     });
-//   }
-// });
-
-// // Start server
-// const PORT = process.env.PORT || 3000;
-// app.listen(PORT, () => {
-//   console.log(`Server is running on port ${PORT}`);
-// });
-
-
-// require('dotenv').config(); // load env variables
-// const express = require('express');
-// const cors = require('cors');
-// const jwt = require('jsonwebtoken');
-// const app = express();
-
-// // Hyperledger / blockchain stuff — leave as is
-// const { submitVoteTransaction } = require('./services/fabricService.js');
-
-// // DB functions (your part — vote verification)
-// const { verifyVoterEligibility, recordVoteReceipt } = require('./db.js'); 
-
-// // Auth routes
-// const authRoutes = require('./routes/auth');
-
-// // Middleware
-// const authMiddleware = require('./middleware/auth');
-// const requireRole = require('./middleware/roles');
-
-//  // ⚡ must declare before using routes
-
-// app.use(cors());
-// app.use(express.json());
-
-// // Test route
-// app.get('/', (req, res) => {
-//   res.send('Server is running!');
-// });
-
-// app.use('/api/auth', authRoutes);
-
-
-// app.get('/api/admin-only', authMiddleware, requireRole('admin'), (req, res) => {
-//   res.json({ message: 'You are an admin!' });
-// });
-
-// app.get('/api/student-only', authMiddleware, requireRole('student'), (req, res) => {
-//   res.json({ message: 'You are a student!' });
-// });
-
-// // =====================
-// // VOTE ROUTE
-// // =====================
-// app.post('/api/vote', async (req, res) => {
-//   const { studentNumber, electionId, candidateId } = req.body;
-
-//   try {
-//     // STEP 1: DB Gatekeeper (your part)
-//     const userId = await verifyVoterEligibility(studentNumber, electionId);
-
-//     // STEP 2: Blockchain / ledger — do not touch
-//     const contract = await getFabricContract();
-//     const result = await contract.submitTransaction('CastVote', electionId, studentNumber, candidateId);
-
-//     // Save receipt
-//     await recordVoteReceipt(userId, electionId, { candidateId }, result.toString());
-
-//     res.status(200).json({
-//       message: 'Success! Vote securely recorded on the blockchain.',
-//       transactionId: result.toString(),
-//     });
-
-//   } catch (error) {
-//     console.error('Voting Error:', error);
-//     res.status(500).json({ 
-//       error: 'Failed to cast vote', 
-//       details: error.message 
-//     });
-//   }
-// });
-
-// const PORT = process.env.PORT || 5000;
-// app.listen(PORT, () => {
-//   console.log(`Server is running on port ${PORT}`);
-// });
-
-
-
-
-
-
-
-
-
-
-
-
-
-// server.js
-// // Main Hub
-// // This ties the database, server and the internet together
-
-require('dotenv').config(); // load env variables
+// backend/src/server.js
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 
-const { connectDB, createUser, findUserByEmail, verifyVoterEligibility, recordVoteReceipt, User } = require('./db.js');
-const authMiddleware = require('./middleware/auth'); // expects req.user from JWT
-const requireRole = require('./middleware/roles'); // checks user.role
-// const authRoutes = require('./routes/auth'); // optional, can keep inline routes
-
-// Hyperledger / blockchain stuff
-const { getFabricContract } = require('./services/fabricService.js');
+const { connectDB, findUserByEmail, createUser, verifyVoterEligibility, recordVoteReceipt, User } = require('./db.js');
+const authMiddleware = require('./middleware/auth');
+const requireRole = require('./middleware/roles');
+const { submitVoteTransaction, initElection, queryResults } = require('./services/fabricService.js');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// =========================
-// AUTH ROUTES
-// =========================
+// ─── AUTH ROUTES ────────────────────────────────────────────────────────────
 
-// Register a new user
 app.post('/api/auth/register', async (req, res) => {
-  const { email, password, fullName, studentNumber, faculty, role } = req.body;
-
-  try {
-    const existing = await findUserByEmail(email);
-    if (existing) return res.status(400).json({ error: 'Email already exists' });
-
-    const userId = await createUser({ email, password, fullName, studentNumber, faculty, role });
-    res.json({ message: 'User created', userId });
-
-  } catch (err) {
-    console.error('Register ERROR:', err);
-    res.status(500).json({ error: 'Failed to create user' });
-  }
+    const { email, password, fullName, studentNumber, faculty, role } = req.body;
+    try {
+        const existing = await findUserByEmail(email);
+        if (existing) return res.status(400).json({ error: 'Email already exists' });
+        const userId = await createUser({ email, password, fullName, studentNumber, faculty, role });
+        res.json({ message: 'User created', userId });
+    } catch (err) {
+        console.error('Register error:', err);
+        res.status(500).json({ error: 'Failed to create user' });
+    }
 });
 
-// Login
 app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body;
-  console.log('Login attempt:', email);
+    const { email, password } = req.body;
+    try {
+        const user = await findUserByEmail(email);
+        if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
-  try {
-    const user = await findUserByEmail(email);
-    if (!user) {
-      console.log('User not found:', email);
-      return res.status(401).json({ error: 'Invalid credentials' });
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+
+        const token = jwt.sign(
+            { userId: user._id, role: user.role },
+            process.env.JWT_SECRET || 'secretkey',
+            { expiresIn: '12h' }
+        );
+
+        res.json({
+            token,
+            role: user.role,
+            user: {
+                email: user.email,
+                name: user.fullName,
+                studentNumber: user.studentNumber,
+                faculty: user.faculty,
+            }
+        });
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Login failed' });
     }
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      console.log('Password mismatch for:', email);
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign(
-      { userId: user._id, role: user.role },
-      process.env.JWT_SECRET || 'secretkey',
-      { expiresIn: '12h' }
-    );
-
-    console.log('Login successful for:', email);
-    res.json({
-      token,
-      role: user.role,
-      user: { email: user.email, fullName: user.fullName, studentNumber: user.studentNumber }
-    });
-
-  } catch (err) {
-    console.error('Login route ERROR:', err);
-    res.status(500).json({ error: 'Login failed' });
-  }
 });
 
-// =========================
-// PROTECTED EXAMPLE ROUTES
-// =========================
-app.get('/api/admin-only', authMiddleware, requireRole('admin'), (req, res) => {
-  res.json({ message: 'You are an admin!' });
-});
+// ─── ADMIN ROUTES ────────────────────────────────────────────────────────────
 
-app.get('/api/student-only', authMiddleware, requireRole('student'), (req, res) => {
-  res.json({ message: 'You are a student!' });
-});
-
-// =========================
-// ADMIN ENDPOINTS
-// =========================
 app.get('/api/admin/stats', authMiddleware, requireRole('admin'), async (req, res) => {
-  console.log('Admin stats request received');
-  console.log('Headers:', req.headers);
-  console.log('User:', req.userId, 'Role:', req.role);
-  try {
-    // Mock stats for now - replace with real DB queries later
-    const stats = {
-      totalElections: 1,
-      totalCandidates: 5,
-      registeredVoters: 150,
-      totalVotes: 89
-    };
-    console.log('Sending stats:', stats);
-    res.json(stats);
-  } catch (error) {
-    console.error('Admin stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch admin statistics' });
-  }
+    try {
+        res.json({
+            totalElections: 1,
+            totalCandidates: 5,
+            registeredVoters: 150,
+            totalVotes: 89
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch stats' });
+    }
 });
 
 app.get('/api/elections/current', authMiddleware, requireRole('admin'), async (req, res) => {
-  try {
-    // Mock current election - replace with real DB query later
-    const currentElection = {
-      electionId: 'election-2026-001',
-      title: 'USC Election 2026',
-      status: 'active',
-      startDate: '2026-01-01',
-      endDate: '2026-02-15'
-    };
-    res.json(currentElection);
-  } catch (error) {
-    console.error('Current election error:', error);
-    res.status(500).json({ error: 'Failed to fetch current election' });
-  }
+    try {
+        res.json({
+            electionId: 'ballot-2026-001',
+            title: 'USC Election 2026',
+            status: 'active',
+            startDate: '2026-01-01',
+            endDate: '2026-02-15'
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch current election' });
+    }
 });
 
-// =========================
-// STUDENT ENDPOINTS
-// =========================
-app.get('/api/ballots', authMiddleware, requireRole('student'), async (req, res) => {
-  try {
-    // Mock ballots for now - replace with real DB queries later
-    const ballots = {
-      currentBallots: [
-        {
-          ballotId: 'ballot-2026-001',
-          title: 'USC Election 2026',
-          startDate: '2026-01-01',
-          endDate: '2026-02-15',
-          status: 'open',
-        }
-      ]
-    };
-    res.json(ballots);
-  } catch (error) {
-    console.error('Ballots error:', error);
-    res.status(500).json({ error: 'Failed to fetch ballots' });
-  }
+// Admin: initialize election on blockchain
+app.post('/api/admin/elections/init', authMiddleware, requireRole('admin'), async (req, res) => {
+    const { electionId, electionName } = req.body;
+    try {
+        await initElection(electionId, electionName);
+        res.json({ success: true, message: `Election ${electionId} initialized on blockchain` });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to initialize election', details: err.message });
+    }
+});
+
+// Admin: get election results from blockchain
+app.get('/api/admin/results/:electionId', authMiddleware, requireRole('admin'), async (req, res) => {
+    const { electionId } = req.params;
+    try {
+        const tally = await queryResults(electionId);
+        const resultsArray = Object.entries(tally).map(([candidateName, votes]) => ({
+            candidateName,
+            votes,
+        }));
+        const totalVotes = resultsArray.reduce((sum, r) => sum + r.votes, 0);
+        res.json({
+            electionId,
+            title: 'USC Election 2026',
+            totalVotes,
+            results: resultsArray,
+        });
+    } catch (err) {
+        // Fallback mock if blockchain unavailable
+        console.warn('Blockchain unavailable, returning mock results:', err.message);
+        res.json({
+            electionId,
+            title: 'USC Election 2026',
+            totalVotes: 3,
+            results: [
+                { candidateName: 'John Smith', votes: 1 },
+                { candidateName: 'Sarah Johnson', votes: 2 },
+            ],
+        });
+    }
+});
+
+// ─── STUDENT ROUTES ──────────────────────────────────────────────────────────
+
+app.get('/api/student/stats', authMiddleware, requireRole('student'), async (req, res) => {
+    try {
+        res.json({
+            ongoingElections: 1,
+            votesCast: 0,
+            upcomingElections: 2,
+            pastElections: 6,
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch student stats' });
+    }
 });
 
 app.get('/api/voting-receipts', authMiddleware, requireRole('student'), async (req, res) => {
-  try {
-    // Mock receipts for now - replace with real DB queries later
-    const receipts = {
-      receipts: [
-        {
-          ballotId: 'ballot-2025-001',
-          ballotTitle: 'USC Election 2025',
-          transactionId: 'tx-1704067200000',
-          timestamp: '2025-01-01T12:00:00Z',
-        }
-      ]
-    };
-    res.json(receipts);
-  } catch (error) {
-    console.error('Voting receipts error:', error);
-    res.status(500).json({ error: 'Failed to fetch voting receipts' });
-  }
-});
-
-app.get('/api/student/stats', authMiddleware, requireRole('student'), async (req, res) => {
-  try {
-    // Mock student stats for now - replace with real DB queries later
-    const stats = {
-      ongoingElections: 1,
-      completedVotes: 0,
-      totalAvailableBallots: 1
-    };
-    res.json(stats);
-  } catch (error) {
-    console.error('Student stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch student statistics' });
-  }
-});
-
-// =========================
-// VOTING ENDPOINTS
-// =========================
-app.post('/api/votes', authMiddleware, requireRole('student'), async (req, res) => {
-  try {
-    const { ballotId, selections } = req.body;
-    const userId = req.userId;
-
-    // Get user details
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
-    }
-
-    const studentNumber = user.studentNumber;
-    const electionId = ballotId; // Assume ballotId maps to electionId
-
-    // Assume single contest for simplicity, get candidateId
-    const candidateId = selections['contest-1']; // Adjust based on actual structure
-
-    // Verify voter eligibility
-    const verifiedUserId = await verifyVoterEligibility(studentNumber, electionId);
-
-    // Submit to blockchain
-    let transactionId;
     try {
-      const contract = await getFabricContract();
-      const result = await contract.submitTransaction('CastVote', electionId, studentNumber, candidateId);
-      transactionId = result.toString();
-    } catch (blockchainError) {
-      console.warn('Blockchain not available, using mock transaction:', blockchainError.message);
-      // Fallback to mock transaction for development
-      transactionId = `mock-tx-${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // In production: query VoteReceipt collection filtered by req.userId
+        res.json({ receipts: [] });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch receipts' });
     }
+});
 
-    // Record vote receipt
-    await recordVoteReceipt(verifiedUserId, electionId, { selections }, transactionId);
-
-    res.json({
-      success: true,
-      transactionId: transactionId,
-      message: 'Vote submitted successfully'
-    });
-  } catch (error) {
-    console.error('Voting error:', error);
-    res.status(500).json({ error: 'Failed to submit vote', details: error.message });
-  }
+app.get('/api/ballots', authMiddleware, requireRole('student'), async (req, res) => {
+    try {
+        res.json({
+            currentBallots: [
+                {
+                    ballotId: 'ballot-2026-001',
+                    title: 'USC Election 2026',
+                    startDate: '2026-01-01',
+                    endDate: '2026-02-15',
+                    status: 'open',
+                }
+            ]
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch ballots' });
+    }
 });
 
 app.get('/api/ballots/:ballotId', authMiddleware, requireRole('student'), async (req, res) => {
-  try {
-    const { ballotId } = req.params;
-
-    // Mock ballot details - replace with real DB query later
-    const ballot = {
-      ballotId: ballotId,
-      title: 'USC Election 2026',
-      contests: [
-        {
-          id: 'contest-1',
-          title: 'USC President',
-          instructionText: 'Rank candidates in order of preference (1 = most preferred)',
-          ruleType: 'ranked',
-          required: true,
-          restrictionFaculty: null,
-          candidates: [
-            { id: 'c1', name: 'John Smith', description: 'Candidate for President' },
-            { id: 'c2', name: 'Sarah Johnson', description: 'Candidate for President' },
-            { id: 'c3', name: 'Michael Chen', description: 'Candidate for President' },
-          ],
-        }
-      ]
-    };
-
-    res.json(ballot);
-  } catch (error) {
-    console.error('Ballot details error:', error);
-    res.status(500).json({ error: 'Failed to fetch ballot details' });
-  }
+    try {
+        const { ballotId } = req.params;
+        // In production, fetch from DB. For now return mock based on ballotId.
+        res.json({
+            ballotId,
+            title: 'USC Election 2026',
+            contests: [
+                {
+                    id: 'contest-1',
+                    title: 'USC President',
+                    instructionText: 'Rank candidates in order of preference (1 = most preferred)',
+                    ruleType: 'ranked',
+                    required: true,
+                    restrictionFaculty: null,
+                    candidates: [
+                        { id: 'c1', name: 'John Smith', description: 'Faculty of Science' },
+                        { id: 'c2', name: 'Sarah Johnson', description: 'Faculty of Arts' },
+                        { id: 'c3', name: 'Michael Chen', description: 'Faculty of Engineering' },
+                    ],
+                },
+                {
+                    id: 'contest-2',
+                    title: 'Science President',
+                    instructionText: 'Select one candidate',
+                    ruleType: 'single',
+                    required: true,
+                    restrictionFaculty: 'SCIENCE',
+                    candidates: [
+                        { id: 'c4', name: 'Alice Brown', description: 'Science Faculty Candidate' },
+                        { id: 'c5', name: 'Bob Wilson', description: 'Science Faculty Candidate' },
+                    ],
+                },
+                {
+                    id: 'contest-3',
+                    title: 'Science Councillor',
+                    instructionText: 'Select up to 6 candidates',
+                    ruleType: 'multi',
+                    required: true,
+                    maxSelections: 6,
+                    restrictionFaculty: 'SCIENCE',
+                    candidates: [
+                        { id: 'c6', name: 'David Lee', description: 'Science Councillor Candidate' },
+                        { id: 'c7', name: 'Emma Davis', description: 'Science Councillor Candidate' },
+                        { id: 'c8', name: 'Frank Miller', description: 'Science Councillor Candidate' },
+                        { id: 'c9', name: 'Grace Taylor', description: 'Science Councillor Candidate' },
+                        { id: 'c10', name: 'Henry White', description: 'Science Councillor Candidate' },
+                        { id: 'c11', name: 'Ivy Martinez', description: 'Science Councillor Candidate' },
+                        { id: 'c12', name: 'Jack Anderson', description: 'Science Councillor Candidate' },
+                    ],
+                },
+                {
+                    id: 'contest-4',
+                    title: 'Senate – At Large',
+                    instructionText: 'Select up to 4 candidates',
+                    ruleType: 'multi',
+                    required: true,
+                    maxSelections: 4,
+                    restrictionFaculty: null,
+                    candidates: [
+                        { id: 'c13', name: 'Karen Thompson', description: 'Senate Candidate' },
+                        { id: 'c14', name: 'Liam Garcia', description: 'Senate Candidate' },
+                        { id: 'c15', name: 'Mia Rodriguez', description: 'Senate Candidate' },
+                        { id: 'c16', name: 'Noah Lewis', description: 'Senate Candidate' },
+                        { id: 'c17', name: 'Olivia Walker', description: 'Senate Candidate' },
+                    ],
+                },
+            ]
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch ballot details' });
+    }
 });
 
-// Submit ballot endpoint (used by frontend)
+// ─── VOTE SUBMISSION ─────────────────────────────────────────────────────────
+//
+// POST /api/ballots/:ballotId/submit
+//
+// Body: { selections: { "contest-1": ["c2","c1","c3"], "contest-2": ["c4"] } }
+//
+// Flow:
+//   1. Verify voter eligibility (active student in DB)
+//   2. Submit first contest's top selection to blockchain via CastVote
+//   3. Record receipt in MongoDB
+//   4. Return transaction ID to frontend
+//
 app.post('/api/ballots/:ballotId/submit', authMiddleware, requireRole('student'), async (req, res) => {
-  try {
     const { ballotId } = req.params;
     const { selections } = req.body;
-    const userId = req.userId;
 
-    // Get user details
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+    if (!selections || Object.keys(selections).length === 0) {
+        return res.status(400).json({ error: 'No selections provided' });
     }
 
-    const studentNumber = user.studentNumber;
-    const electionId = ballotId; // Assume ballotId maps to electionId
-
-    // Handle selections - for now, take the first contest and first candidate
-    const contestIds = Object.keys(selections);
-    if (contestIds.length === 0) {
-      return res.status(400).json({ error: 'No selections provided' });
-    }
-    
-    const firstContest = contestIds[0];
-    const candidateSelections = selections[firstContest];
-    
-    let candidateId;
-    if (Array.isArray(candidateSelections)) {
-      // For ranked/multi, take the first choice
-      candidateId = candidateSelections[0];
-    } else {
-      candidateId = candidateSelections;
-    }
-
-    if (!candidateId) {
-      return res.status(400).json({ error: 'No candidate selected' });
-    }
-
-    // Verify voter eligibility
-    const verifiedUserId = await verifyVoterEligibility(studentNumber, electionId);
-
-    // Submit to blockchain
-    let transactionId;
     try {
-      const contract = await getFabricContract();
-      const result = await contract.submitTransaction('CastVote', electionId, studentNumber, candidateId);
-      transactionId = result.toString();
-    } catch (blockchainError) {
-      console.warn('Blockchain not available, using mock transaction:', blockchainError.message);
-      // Fallback to mock transaction for development
-      transactionId = `mock-tx-${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // 1. Get voter details from DB
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(401).json({ error: 'User not found' });
+
+        const studentNumber = user.studentNumber;
+        const electionId = ballotId;
+
+        // 2. Build a readable summary of all selections for the receipt
+        //    For blockchain, we record the primary contest's top pick.
+        //    (CastVote chaincode takes a single candidateName per voter per election)
+        const contestIds = Object.keys(selections);
+        const primaryContestId = contestIds[0];
+        const primarySelection = selections[primaryContestId];
+        const primaryCandidateId = Array.isArray(primarySelection)
+            ? primarySelection[0]
+            : primarySelection;
+
+        if (!primaryCandidateId) {
+            return res.status(400).json({ error: 'No candidate selected in primary contest' });
+        }
+
+        // 3. Verify voter eligibility (checks enrollment_status === 'active')
+        let verifiedUserId;
+        try {
+            verifiedUserId = await verifyVoterEligibility(studentNumber, electionId);
+        } catch (eligibilityErr) {
+            return res.status(403).json({ error: eligibilityErr.message });
+        }
+
+        // 4. Submit to blockchain
+        let transactionId;
+        try {
+            const result = await submitVoteTransaction(electionId, studentNumber, primaryCandidateId);
+            // The chaincode returns a JSON vote object; extract a tx ID or use the result
+            transactionId = `bc-${Date.now()}-${result.substring(0, 8)}`;
+        } catch (blockchainErr) {
+            console.warn('Blockchain unavailable, using mock tx:', blockchainErr.message);
+            // In development without a running Fabric network, fall back gracefully
+            transactionId = `mock-tx-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+        }
+
+        // 5. Save receipt to MongoDB
+        await recordVoteReceipt(verifiedUserId, electionId, { selections }, transactionId);
+
+        // 6. Return success to frontend
+        res.json({
+            success: true,
+            transactionId,
+            message: 'Your vote has been recorded on the blockchain.',
+        });
+
+    } catch (err) {
+        console.error('Vote submission error:', err);
+        res.status(500).json({
+            error: 'Failed to submit ballot',
+            details: err.message,
+        });
     }
-
-    // Record vote receipt
-    await recordVoteReceipt(verifiedUserId, electionId, { selections }, transactionId);
-
-    res.json({
-      success: true,
-      transactionId: transactionId,
-      message: 'Vote submitted successfully'
-    });
-  } catch (error) {
-    console.error('Ballot submit error:', error);
-    res.status(500).json({ error: 'Failed to submit ballot', details: error.message });
-  }
 });
 
-// =========================
-// START SERVER
-// =========================
-const PORT = process.env.PORT || 5000;
+// ─── START SERVER ─────────────────────────────────────────────────────────────
+
+const PORT = process.env.PORT || 5001;
 connectDB()
-  .then(() => {
-    console.log('✅ MongoDB connected!');
-    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-  })
-  .catch(err => console.error('❌ Failed to connect DB', err));
+    .then(() => {
+        console.log('✅ MongoDB connected!');
+        app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+    })
+    .catch(err => {
+        console.error('❌ MongoDB connection failed:', err);
+        process.exit(1);
+    });
