@@ -10,9 +10,19 @@ const authMiddleware = require('./middleware/auth');
 const requireRole = require('./middleware/roles');
 const { submitVoteTransaction, initElection, queryResults } = require('./services/fabricService.js');
 
+// 1. Require the new elections router
+const electionsRouter = require('./routes/elections');
+
+// 2. Initialize Express
 const app = express();
+
+// 3. Set up Middleware
 app.use(cors());
 app.use(express.json());
+
+// 4. Register the new elections router AFTER app and express.json() are ready
+app.use('/api/elections', electionsRouter);
+
 
 // ─── AUTH ROUTES ────────────────────────────────────────────────────────────
 
@@ -248,17 +258,7 @@ app.get('/api/ballots/:ballotId', authMiddleware, requireRole('student'), async 
 });
 
 // ─── VOTE SUBMISSION ─────────────────────────────────────────────────────────
-//
-// POST /api/ballots/:ballotId/submit
-//
-// Body: { selections: { "contest-1": ["c2","c1","c3"], "contest-2": ["c4"] } }
-//
-// Flow:
-//   1. Verify voter eligibility (active student in DB)
-//   2. Submit first contest's top selection to blockchain via CastVote
-//   3. Record receipt in MongoDB
-//   4. Return transaction ID to frontend
-//
+
 app.post('/api/ballots/:ballotId/submit', authMiddleware, requireRole('student'), async (req, res) => {
     const { ballotId } = req.params;
     const { selections } = req.body;
@@ -268,16 +268,12 @@ app.post('/api/ballots/:ballotId/submit', authMiddleware, requireRole('student')
     }
 
     try {
-        // 1. Get voter details from DB
         const user = await User.findById(req.userId);
         if (!user) return res.status(401).json({ error: 'User not found' });
 
         const studentNumber = user.studentNumber;
         const electionId = ballotId;
 
-        // 2. Build a readable summary of all selections for the receipt
-        //    For blockchain, we record the primary contest's top pick.
-        //    (CastVote chaincode takes a single candidateName per voter per election)
         const contestIds = Object.keys(selections);
         const primaryContestId = contestIds[0];
         const primarySelection = selections[primaryContestId];
@@ -289,7 +285,6 @@ app.post('/api/ballots/:ballotId/submit', authMiddleware, requireRole('student')
             return res.status(400).json({ error: 'No candidate selected in primary contest' });
         }
 
-        // 3. Verify voter eligibility (checks enrollment_status === 'active')
         let verifiedUserId;
         try {
             verifiedUserId = await verifyVoterEligibility(studentNumber, electionId);
@@ -297,22 +292,17 @@ app.post('/api/ballots/:ballotId/submit', authMiddleware, requireRole('student')
             return res.status(403).json({ error: eligibilityErr.message });
         }
 
-        // 4. Submit to blockchain
         let transactionId;
         try {
             const result = await submitVoteTransaction(electionId, studentNumber, primaryCandidateId);
-            // The chaincode returns a JSON vote object; extract a tx ID or use the result
             transactionId = `bc-${Date.now()}-${result.substring(0, 8)}`;
         } catch (blockchainErr) {
             console.warn('Blockchain unavailable, using mock tx:', blockchainErr.message);
-            // In development without a running Fabric network, fall back gracefully
             transactionId = `mock-tx-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
         }
 
-        // 5. Save receipt to MongoDB
         await recordVoteReceipt(verifiedUserId, electionId, { selections }, transactionId);
 
-        // 6. Return success to frontend
         res.json({
             success: true,
             transactionId,
