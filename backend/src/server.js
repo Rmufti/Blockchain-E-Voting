@@ -1,4 +1,5 @@
 // backend/src/server.js
+const electionsRouter = require('./routes/elections');
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -19,6 +20,7 @@ const app = express();
 // 3. Set up Middleware
 app.use(cors());
 app.use(express.json());
+app.use('/api/elections', electionsRouter);
 
 // 4. Register the new elections router AFTER app and express.json() are ready
 app.use('/api/elections', electionsRouter);

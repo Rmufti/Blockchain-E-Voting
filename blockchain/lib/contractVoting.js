@@ -4,15 +4,21 @@ const { Contract } = require('fabric-contract-api');
 
 class contractVoting extends Contract {
 
+    // ADD THIS CONSTRUCTOR: It tells Fabric to drop the 'contractVoting:' prefix
+    constructor() {
+        super('evoting');
+    }
+
     // Initialize the election
     async InitElection(ctx, electionID, electionName) {
         const election = {
             docType: 'election',
             ID: electionID,
             Name: electionName,
-            Status: 'OPEN'  // FIX 1: Changed 'Open' to 'OPEN' to match test
+            Status: 'OPEN'  
         };
         await ctx.stub.putState(electionID, Buffer.from(JSON.stringify(election)));
+        console.log(`*** ELECTION CREATED: ${electionName} ***`); // Added a log so you can see it work!
         return JSON.stringify(election);
     }
 

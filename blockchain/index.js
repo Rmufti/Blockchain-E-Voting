@@ -1,12 +1,8 @@
-/*
- * Copyright IBM Corp. All Rights Reserved.
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 'use strict';
 
-const assetTransfer = require('./lib/assetTransfer');
+// 1. Point it to your voting contract file
+const contractVoting = require('./lib/contractVoting.js');
 
-module.exports.AssetTransfer = assetTransfer;
-module.exports.contracts = [assetTransfer];
+// 2. Export it so Fabric can see it
+module.exports.contractVoting = contractVoting;
+module.exports.contracts = [ contractVoting ];

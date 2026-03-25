@@ -1,17 +1,15 @@
-# UPDATE: Use Node 20 to match package.json "engines" requirement
-FROM node:20-alpine
-
+FROM node:18
 WORKDIR /usr/src/app
 
-# Copy package files and install production dependencies
+# Install dependencies
 COPY package*.json ./
-RUN npm install --production
+RUN npm install
 
-# Copy the rest of the smart contract code
+# Copy your actual smart contract code
 COPY . .
 
-# Expose the port
+# Expose the port Fabric uses to talk to the chaincode
 EXPOSE 9999
 
-# Start the server using the "start" script in package.json
-CMD ["npm", "start"]
+# Start the server and explicitly pass the Docker environment variables
+CMD npm start -- --chaincode-address=$CHAINCODE_SERVER_ADDRESS --chaincode-id=$CORE_CHAINCODE_ID_NAME
