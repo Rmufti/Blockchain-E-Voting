@@ -21,6 +21,16 @@ class contractVoting extends Contract {
         console.log(`*** ELECTION CREATED: ${electionName} ***`); // Added a log so you can see it work!
         return JSON.stringify(election);
     }
+    // Fetch Election Details for the Frontend
+    async GetElection(ctx, electionID) {
+        const electionBytes = await ctx.stub.getState(electionID);
+        
+        if (!electionBytes || electionBytes.length === 0) {
+            throw new Error(`Election ${electionID} does not exist`);
+        }
+        
+        return electionBytes.toString();
+    }
 
     // Voting (Core Logic)
     // FIX 2: Renamed 'CastVotes' to 'CastVote' (Singular) to match test

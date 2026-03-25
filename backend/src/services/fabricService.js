@@ -19,7 +19,10 @@ async function getContract() {
     await gateway.connect(ccp, {
         wallet,
         identity: 'appUser',
-        discovery: { enabled: false, asLocalhost: true }
+        discovery: { enabled: true, asLocalhost: true },
+        eventHandlerOptions: {
+            strategy: null, // 🔥 disables waiting for commit events
+        },
     });
 
     const network = await gateway.getNetwork('mychannel');
@@ -103,9 +106,35 @@ async function queryResults(electionId) {
         if (gateway) gateway.disconnect();
     }
 }
+/**
+ * Fetch the details of a specific election to display to the voter.
+ * @param {string} electionId
+ * @returns {object} election details (candidates, status, etc.)
+ */
+async function getElection(electionId) {
+    let gateway;
+    try {
+        const result = await getContract();
+        gateway = result.gateway;
+        const contract = result.contract;
+
+        // Note: 'GetElection' or 'ReadElection' must match the exact function name in your Chaincode
+        const raw = await contract.evaluateTransaction('GetElection', electionId);
+        
+        console.log(`Successfully fetched election ${electionId} from blockchain.`);
+        return JSON.parse(raw.toString());
+    } catch (error) {
+        console.error(`Failed to fetch election ${electionId}:`, error.message);
+        throw error;
+    } finally {
+        if (gateway) gateway.disconnect();
+    }
+}
+
 
 module.exports = {
     submitVoteTransaction,
     initElection,
     queryResults,
+    getElection,
 };

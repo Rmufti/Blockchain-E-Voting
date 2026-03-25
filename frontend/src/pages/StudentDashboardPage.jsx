@@ -49,7 +49,8 @@ const StudentDashboardPage = () => {
         apiService.getStudentStats(),
       ])
       
-      setBallots(ballotsResponse.data?.currentBallots || [])
+      // Look for the real backend 'elections' array first!
+      setBallots(ballotsResponse.data?.elections || ballotsResponse.data?.currentBallots || [])
       setReceipts(receiptsResponse.data?.receipts || [])
       setStats(statsResponse.data)
     } catch (err) {

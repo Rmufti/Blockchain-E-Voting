@@ -5,7 +5,8 @@ const { v4: uuidv4 } = require('uuid');
 const authMiddleware = require('../middleware/auth');
 const requireRole = require('../middleware/roles');
 const Election = require('../models/Election');
-const { initElection } = require('../services/fabricService');
+const { initElection, getElection } = require('../services/fabricService');
+const { submitVoteTransaction } = require('../services/fabricService');
 
 const KNOWN_FACULTIES = [
     'SCIENCE',
@@ -60,7 +61,25 @@ router.get('/:ballotId', authMiddleware, async (req, res) => {
             }
         }
 
-        res.json(election);
+        // --- NEW BLOCKCHAIN FETCH LOGIC ---
+        let blockchainData = null;
+        try {
+            // Ask the smart contract for the official ledger state
+            blockchainData = await getElection(req.params.ballotId);
+        } catch (bcErr) {
+            console.warn(`Could not fetch blockchain data for ${req.params.ballotId}:`, bcErr.message);
+            // We don't fail the whole request here, just in case the network is temporarily down
+        }
+
+        // Combine MongoDB data with Blockchain data
+        const responseData = {
+            ...election.toObject(), // Convert Mongoose document to standard JSON
+            blockchainState: blockchainData 
+        };
+
+        res.json(responseData);
+        // ----------------------------------
+
     } catch (err) {
         console.error('GET /elections/:ballotId error:', err);
         res.status(500).json({ error: 'Failed to fetch election' });
@@ -208,6 +227,40 @@ router.post('/:ballotId/blockchain-init', authMiddleware, requireRole('admin'), 
     } catch (err) {
         console.error('blockchain-init error:', err);
         res.status(500).json({ error: 'Blockchain initialization failed', details: err.message });
+    }
+});
+
+// Add this route near the bottom of backend/src/routes/elections.js
+// ── POST /api/elections/:ballotId/submit ────────────────────────────────────
+router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
+    try {
+        const { ballotId } = req.params;
+        const { selections } = req.body;
+        
+        // Use the student's ID from the auth token
+        const voterId = req.userId; 
+
+        // Extract the selected candidate ID
+        // Note: If you have multiple contests, you might need to loop through this, 
+        // but this works for a single contest selection!
+        const contestId = Object.keys(selections)[0];
+        const candidateId = selections[contestId][0]; 
+
+        // Send to the Hyperledger Fabric Smart Contract
+        const txResult = await submitVoteTransaction(ballotId, voterId, candidateId);
+
+        res.json({ 
+            success: true, 
+            transactionId: txResult, 
+            message: 'Vote successfully secured on the blockchain.' 
+        });
+
+    } catch (err) {
+        console.error('Failed to submit vote to blockchain:', err);
+        if (err.message && err.message.includes('already voted')) {
+            return res.status(400).json({ error: 'You have already voted in this election.' });
+        }
+        res.status(500).json({ error: 'Failed to process vote on the blockchain.' });
     }
 });
 

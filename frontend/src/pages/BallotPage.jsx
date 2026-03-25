@@ -15,6 +15,7 @@ import {
   Checkbox,
   FormControlLabel,
   Paper,
+  Chip,
 } from '@mui/material'
 import { apiService } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -201,10 +202,32 @@ const BallotPage = () => {
       <Container maxWidth="md">
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 3 }}>
           <Box>
-            <Typography variant="h4" gutterBottom sx={{ mb: 1, color: '#4A148C' }}>
-              {ballot.title}
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#616161' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+              <Typography variant="h4" sx={{ color: '#4A148C', m: 0 }}>
+                {ballot.title}
+              </Typography>
+              
+              {/* --- NEW BLOCKCHAIN STATUS BADGE --- */}
+              {ballot.blockchainState ? (
+                 <Chip 
+                   label={`Blockchain: ${ballot.blockchainState.Status}`} 
+                   color={ballot.blockchainState.Status === 'OPEN' ? 'success' : 'error'}
+                   size="small"
+                   variant="outlined"
+                   sx={{ fontWeight: 'bold' }}
+                 />
+              ) : (
+                 <Chip 
+                   label="Blockchain: Pending" 
+                   color="warning" 
+                   size="small" 
+                   variant="outlined" 
+                 />
+              )}
+              {/* ----------------------------------- */}
+              
+            </Box>
+            <Typography variant="body2" sx={{ color: '#616161', mt: 1 }}>
               Please complete all required contests. You can only vote once.
             </Typography>
           </Box>

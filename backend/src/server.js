@@ -1,5 +1,4 @@
 // backend/src/server.js
-const electionsRouter = require('./routes/elections');
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
