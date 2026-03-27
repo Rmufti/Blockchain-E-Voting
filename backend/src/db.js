@@ -54,6 +54,9 @@ const voteReceiptSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now }
 });
 
+// Enforce one vote per user per election at the database level.
+voteReceiptSchema.index({ userId: 1, electionId: 1 }, { unique: true });
+
 const VoteReceipt = mongoose.model('VoteReceipt', voteReceiptSchema);
 
 // Connect to MongoDB
@@ -105,11 +108,18 @@ async function recordVoteReceipt(userId, electionId, voteData, transactionId) {
   return receipt._id;
 }
 
+async function hasUserVoted(userId, electionId) {
+  const existing = await VoteReceipt.exists({ userId, electionId });
+  return !!existing;
+}
+
 module.exports = {
   connectDB,
   createUser,
   findUserByEmail,
   verifyVoterEligibility,
   recordVoteReceipt,
+  hasUserVoted,
+  VoteReceipt,
   User
 };

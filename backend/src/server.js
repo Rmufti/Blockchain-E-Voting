@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const mongoose = require('mongoose');
 
-const { connectDB, findUserByEmail, createUser, verifyVoterEligibility, recordVoteReceipt, User } = require('./db.js');
+const { connectDB, findUserByEmail, createUser, verifyVoterEligibility, recordVoteReceipt, VoteReceipt, User } = require('./db.js');
 const Election = require('./models/Election');
 const authMiddleware = require('./middleware/auth');
 const requireRole = require('./middleware/roles');
@@ -42,23 +42,31 @@ function normalizeFaculty(value) {
     return value ? String(value).trim().toUpperCase().replace(/\s+/g, '_') : null;
 }
 
-async function countElectionsForUser({ role, faculty, status = null, scope = 'view' }) {
+async function getElectionIdsForUser({ role, faculty, status = null, scope = 'view' }) {
     const query = status ? { status } : {};
     const elections = await Election.find(query)
-        .select('restrictedToFaculty voterRestriction status')
+        .select('ballotId restrictedToFaculty voterRestriction status')
         .lean();
 
     const policyCheck = scope === 'participate'
         ? electionPolicies.canParticipateInElection
         : electionPolicies.canViewElection;
 
-    return elections.filter((election) =>
+    return elections
+        .filter((election) =>
         policyCheck({
             userRole: role,
             userFaculty: faculty,
             election,
         })
-    ).length;
+        )
+        .map((election) => election.ballotId)
+        .filter(Boolean);
+}
+
+async function countElectionsForUser({ role, faculty, status = null, scope = 'view' }) {
+    const electionIds = await getElectionIdsForUser({ role, faculty, status, scope });
+    return electionIds.length;
 }
 
 function canManageRole(actor, targetRole) {
@@ -220,12 +228,13 @@ app.get('/api/admin/stats', authMiddleware, requireRole('admin', 'usc_admin', 'u
     try {
         const actorRole = normalizeRole(req.role);
         const actorFaculty = normalizeFaculty(req.faculty);
-
-        const totalElections = await countElectionsForUser({
+        const visibleElectionIds = await getElectionIdsForUser({
             role: actorRole,
             faculty: actorFaculty,
             scope: 'view',
         });
+
+        const totalElections = visibleElectionIds.length;
         const openElections = await countElectionsForUser({
             role: actorRole,
             faculty: actorFaculty,
@@ -238,12 +247,15 @@ app.get('/api/admin/stats', authMiddleware, requireRole('admin', 'usc_admin', 'u
             ? { role: 'student', faculty: { $regex: new RegExp(`^${actorFaculty}$`, 'i') } }
             : { role: 'student' };
         const registeredVoters = await User.countDocuments(voterFilter);
+        const totalVotes = visibleElectionIds.length > 0
+            ? await VoteReceipt.countDocuments({ electionId: { $in: visibleElectionIds } })
+            : 0;
 
         res.json({
             totalElections,
             totalCandidates: 0,
             registeredVoters,
-            totalVotes: 0,
+            totalVotes,
             openElections,
         });
     } catch (err) {
@@ -509,9 +521,10 @@ app.get('/api/student/stats', authMiddleware, requireRole(...ALL_VOTER_ROLES), a
             status: 'closed',
             scope: 'participate',
         });
+        const votesCast = await VoteReceipt.countDocuments({ userId: req.userId });
         res.json({
             ongoingElections,
-            votesCast: 0,
+            votesCast,
             upcomingElections,
             pastElections,
         });
@@ -522,7 +535,26 @@ app.get('/api/student/stats', authMiddleware, requireRole(...ALL_VOTER_ROLES), a
 
 app.get('/api/voting-receipts', authMiddleware, requireRole(...ALL_VOTER_ROLES), async (req, res) => {
     try {
-        res.json({ receipts: [] });
+        const receipts = await VoteReceipt.find({ userId: req.userId })
+            .select('electionId transactionId timestamp voteData')
+            .sort({ timestamp: -1 })
+            .lean();
+
+        const electionIds = [...new Set(receipts.map((receipt) => receipt.electionId).filter(Boolean))];
+        const elections = electionIds.length > 0
+            ? await Election.find({ ballotId: { $in: electionIds } }).select('ballotId title').lean()
+            : [];
+
+        const titleByBallotId = new Map(elections.map((election) => [election.ballotId, election.title]));
+        const mappedReceipts = receipts.map((receipt) => ({
+            ballotId: receipt.electionId,
+            ballotTitle: titleByBallotId.get(receipt.electionId) || receipt.electionId,
+            transactionId: receipt.transactionId,
+            timestamp: receipt.timestamp,
+            voteData: receipt.voteData,
+        }));
+
+        res.json({ receipts: mappedReceipts });
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch receipts' });
     }

@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const authMiddleware = require('../middleware/auth');
 const requireRole = require('../middleware/roles');
 const Election = require('../models/Election');
-const { User } = require('../db');
+const { User, hasUserVoted, recordVoteReceipt } = require('../db');
 const { initElection, getElection } = require('../services/fabricService');
 const { submitVoteTransaction } = require('../services/fabricService');
 
@@ -669,40 +669,44 @@ router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
         // Use the voter's ID from the auth token
         const voterId = req.userId; 
 
+        // Enforce one vote per election before calling blockchain.
+        const alreadyVoted = await hasUserVoted(voterId, ballotId);
+        if (alreadyVoted) {
+            return res.status(400).json({ error: 'You have already voted in this election.' });
+        }
+
+        if (!FABRIC_ENABLED) {
+            return res.status(503).json({ error: 'Blockchain integration is required for voting and is currently disabled.' });
+        }
+
         // Extract the selected candidate ID
         // Note: If you have multiple contests, you might need to loop through this, 
         // but this works for a single contest selection!
         const contestId = Object.keys(selections)[0];
         const candidateId = selections[contestId][0]; 
 
-        let txResult;
-        if (FABRIC_ENABLED) {
-            try {
-                // Send to the Hyperledger Fabric Smart Contract
-                txResult = await submitVoteTransaction(ballotId, voterId, candidateId);
-            } catch (fabricErr) {
-                if (!fabricErr.isFabricUnavailable && !(fabricErr.message || '').includes('already voted')) {
-                    console.warn('Fabric unavailable during vote submit, using local fallback tx id.');
-                }
-                txResult = `mock-tx-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-            }
-        } else {
-            txResult = `mock-tx-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-        }
+        // Send to the Hyperledger Fabric Smart Contract.
+        const txResult = await submitVoteTransaction(ballotId, voterId, candidateId);
+
+        // Persist immutable receipt (unique index also prevents race-condition duplicates).
+        await recordVoteReceipt(voterId, ballotId, selections, String(txResult));
 
         res.json({ 
             success: true, 
             transactionId: txResult, 
-            message: String(txResult).startsWith('mock-tx-')
-                ? 'Vote recorded locally (blockchain currently unavailable).'
-                : 'Vote successfully secured on the blockchain.' 
+            message: 'Vote successfully secured on the blockchain.' 
         });
 
     } catch (err) {
         console.error('Failed to submit vote to blockchain:', err);
-        if (err.message && err.message.includes('already voted')) {
+        if ((err.message && err.message.includes('already voted')) || err?.code === 11000) {
             return res.status(400).json({ error: 'You have already voted in this election.' });
         }
+
+        if (err.isFabricUnavailable) {
+            return res.status(503).json({ error: 'Blockchain is currently unavailable. Please try again shortly.' });
+        }
+
         res.status(500).json({ error: 'Failed to process vote on the blockchain.' });
     }
 });
