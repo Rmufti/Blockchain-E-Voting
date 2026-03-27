@@ -14,20 +14,24 @@ module.exports = async function authMiddleware(req, res, next) {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secretkey');
         req.userId = decoded.userId;
-        req.role = decoded.role;
-        req.roles = Array.isArray(decoded.roles)
-            ? decoded.roles
-            : decoded.role
-            ? [decoded.role]
-            : [];
 
-        // Attach faculty so election routes can filter by it
-        // We look it up fresh each request so it's always current
+        // Load auth scope from the database so role/permission changes apply immediately.
         try {
-            const user = await User.findById(decoded.userId).select('faculty').lean();
+            const user = await User.findById(decoded.userId).select('role faculty permissions').lean();
+            req.role = user?.role || decoded.role;
             req.faculty = user ? (user.faculty || null) : null;
+            req.roles = Array.from(new Set([
+                ...(req.role ? [req.role] : []),
+                ...(Array.isArray(user?.permissions) ? user.permissions : []),
+            ].filter(Boolean)));
         } catch {
+            req.role = decoded.role;
             req.faculty = null; // non-fatal
+            req.roles = Array.isArray(decoded.roles)
+                ? decoded.roles
+                : decoded.role
+                ? [decoded.role]
+                : [];
         }
 
         next();

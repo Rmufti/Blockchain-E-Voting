@@ -30,6 +30,8 @@ const KNOWN_FACULTIES = [
     'IVEY',
 ];
 const FACULTY_EXEC_ROLES = new Set(['faculty_president', 'councillor', 'meeting_chair']);
+const ADMIN_PAGE_ROLES = new Set(['admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president']);
+const CANDIDATE_ELIGIBLE_ROLES = new Set(['student', 'candidate']);
 
 const normalizeFaculty = (value) => {
     if (value === null || value === undefined) return null;
@@ -49,6 +51,72 @@ const isPrivilegedViewer = (role) => ['admin', 'usc_admin'].includes(normalizeRo
 const isHigherThanFacultyPresident = (role) => ['usc_president', 'usc_vp'].includes(normalizeRole(role));
 const isFacultyExecRole = (role) => FACULTY_EXEC_ROLES.has(normalizeRole(role));
 const canManageElections = (role) => ['admin', 'usc_admin', 'faculty_president', 'usc_president', 'usc_vp'].includes(normalizeRole(role));
+const isAdminPageRole = (role) => ADMIN_PAGE_ROLES.has(normalizeRole(role));
+
+function collectCandidateReferencesFromElections(elections) {
+    const refs = [];
+
+    (elections || []).forEach((election) => {
+        (election.contests || []).forEach((contest) => {
+            (contest.candidates || []).forEach((candidate) => {
+                refs.push({
+                    studentUserId: candidate.studentUserId ? String(candidate.studentUserId) : null,
+                    email: normalizeEmail(candidate.email),
+                    studentNumber: normalizeStudentNumber(candidate.studentNumber),
+                });
+            });
+        });
+    });
+
+    return refs;
+}
+
+async function reconcileCandidateRoles() {
+    const openElections = await Election.find({ status: 'open' })
+        .select('contests.candidates.studentUserId contests.candidates.email contests.candidates.studentNumber')
+        .lean();
+
+    const refs = collectCandidateReferencesFromElections(openElections);
+    const orClauses = [];
+    refs.forEach((ref) => {
+        if (ref.studentUserId) orClauses.push({ _id: ref.studentUserId });
+        if (ref.email) orClauses.push({ email: ref.email });
+        if (ref.studentNumber) orClauses.push({ studentNumber: ref.studentNumber });
+    });
+
+    let activeCandidateIds = [];
+    if (orClauses.length > 0) {
+        const candidateUsers = await User.find({
+            role: { $in: Array.from(CANDIDATE_ELIGIBLE_ROLES) },
+            $or: orClauses,
+        }).select('_id').lean();
+        activeCandidateIds = candidateUsers.map((user) => user._id);
+    }
+
+    if (activeCandidateIds.length > 0) {
+        await User.updateMany(
+            { _id: { $in: activeCandidateIds }, role: 'student' },
+            {
+                $set: { role: 'candidate' },
+                $addToSet: { permissions: 'student' },
+            },
+            { runValidators: false, bypassDocumentValidation: true }
+        );
+    }
+
+    const resetFilter = activeCandidateIds.length > 0
+        ? { role: 'candidate', _id: { $nin: activeCandidateIds } }
+        : { role: 'candidate' };
+
+    await User.updateMany(
+        resetFilter,
+        {
+            $set: { role: 'student' },
+            $pull: { permissions: 'student' },
+        },
+        { runValidators: false, bypassDocumentValidation: true }
+    );
+}
 
 const matchesFacultyRestriction = (userFaculty, restrictedToFaculty) => {
     const normalizedRestriction = normalizeFaculty(restrictedToFaculty);
@@ -136,7 +204,7 @@ async function sanitizeContestsToVerifiedStudents(contests) {
     }
 
     const students = await User.find({
-        role: 'student',
+        role: { $in: Array.from(CANDIDATE_ELIGIBLE_ROLES) },
         $or: clauses,
     }).select('_id email studentNumber').lean();
 
@@ -202,7 +270,7 @@ async function normalizeAndValidateContests(contests, defaultRestriction) {
     });
 
     const students = await User.find({
-        role: 'student',
+        role: { $in: Array.from(CANDIDATE_ELIGIBLE_ROLES) },
         $or: orClauses,
     }).select('_id fullName email studentNumber faculty role').lean();
 
@@ -233,6 +301,14 @@ async function normalizeAndValidateContests(contests, defaultRestriction) {
 
                 if (!user) {
                     throw new Error(`Candidate "${candidate.name || `#${idx + 1}`}" is not a valid student in database.`);
+                }
+
+                const normalizedUserRole = normalizeRole(user.role);
+                if (!CANDIDATE_ELIGIBLE_ROLES.has(normalizedUserRole)) {
+                    throw new Error(`Candidate "${user.fullName}" must be a student and cannot hold executive or admin roles.`);
+                }
+                if (isAdminPageRole(normalizedUserRole) || isFacultyExecRole(normalizedUserRole)) {
+                    throw new Error(`Candidate "${user.fullName}" cannot have admin or executive access.`);
                 }
 
                 const candidateKey = String(user._id);
@@ -505,6 +581,8 @@ router.post('/', authMiddleware, async (req, res) => {
             }
         }
 
+        await reconcileCandidateRoles();
+
         res.status(201).json({
             success: true,
             election,
@@ -596,6 +674,7 @@ router.put('/:ballotId', authMiddleware, async (req, res) => {
         );
 
         if (!election) return res.status(404).json({ error: 'Election not found' });
+        await reconcileCandidateRoles();
         res.json({ success: true, election });
     } catch (err) {
         console.error('PUT /elections/:ballotId error:', err);
@@ -620,6 +699,7 @@ router.delete('/:ballotId', authMiddleware, async (req, res) => {
 
         const election = await Election.findOneAndDelete({ ballotId: req.params.ballotId });
         if (!election) return res.status(404).json({ error: 'Election not found' });
+        await reconcileCandidateRoles();
         res.json({ success: true, message: 'Election deleted' });
     } catch (err) {
         console.error('DELETE /elections/:ballotId error:', err);
@@ -682,7 +762,7 @@ router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
             return res.status(403).json({ error: 'You are not eligible to vote in this election.' });
         }
 
-        // Use the voter's ID from the auth token
+        // Use the voter's ID from the auth token for DB checks only.
         const voterId = req.userId; 
 
         // Enforce one vote per election before calling blockchain.
@@ -699,11 +779,15 @@ router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
         const contestId = Object.keys(selections)[0];
         const candidateId = selections[contestId][0]; 
 
-        // FIXED: Generate the castAt timestamp so the response has it, and the blockchain gets it
+        // Generate a stable anonymous election-scoped hash for on-chain double-vote protection.
+        const voterHash = crypto
+            .createHash('sha256')
+            .update(`${String(voterId)}:${String(ballotId)}`)
+            .digest('hex');
+
         const castAt = new Date().toISOString();
 
-        // FIXED: Send all 4 required arguments to the Hyperledger Fabric Smart Contract
-        const txResult = await submitVoteTransaction(ballotId, voterId, candidateId, castAt);
+        const txResult = await submitVoteTransaction(ballotId, voterHash, candidateId, castAt);
 
         // Persist immutable receipt (unique index also prevents race-condition duplicates).
         await recordVoteReceipt(voterId, ballotId, selections, String(txResult));
@@ -731,6 +815,7 @@ router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
 
 module.exports = router;
 module.exports.KNOWN_FACULTIES = KNOWN_FACULTIES;
+module.exports.reconcileCandidateRoles = reconcileCandidateRoles;
 module.exports.__testables = {
     normalizeFaculty,
     normalizeRole,
@@ -738,4 +823,5 @@ module.exports.__testables = {
     passesVoterRestriction,
     canParticipateInElection,
     canViewElection,
+    collectCandidateReferencesFromElections,
 };

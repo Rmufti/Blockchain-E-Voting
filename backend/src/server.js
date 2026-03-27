@@ -11,7 +11,8 @@ const Election = require('./models/Election');
 const authMiddleware = require('./middleware/auth');
 const requireRole = require('./middleware/roles');
 const { submitVoteTransaction, initElection, queryResults } = require('./services/fabricService.js');
-const { __testables: electionPolicies } = require('./routes/elections');
+const electionsModule = require('./routes/elections');
+const { __testables: electionPolicies, reconcileCandidateRoles } = electionsModule;
 const FABRIC_ENABLED = (process.env.FABRIC_ENABLED || 'true').toLowerCase() !== 'false';
 
 const ADMIN_SUPER_ROLES = new Set(['admin', 'usc_admin']);
@@ -21,9 +22,9 @@ const DELEGABLE_ROLES = new Set([
     'faculty_president',
     'councillor',
     'meeting_chair',
-    'candidate',
     'student',
 ]);
+const ADMIN_RELATED_ROLES = new Set(['admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president']);
 const ROLE_RANK = {
     usc_president: 1,
     usc_vp: 2,
@@ -33,6 +34,7 @@ const ROLE_RANK = {
     candidate: 5,
     student: 6,
 };
+const STUDENT_EXEMPT_ROLES = new Set(['usc_president', 'usc_vp']);
 
 function normalizeRole(role) {
     return role ? String(role).trim().toLowerCase() : '';
@@ -67,6 +69,39 @@ async function getElectionIdsForUser({ role, faculty, status = null, scope = 'vi
 async function countElectionsForUser({ role, faculty, status = null, scope = 'view' }) {
     const electionIds = await getElectionIdsForUser({ role, faculty, status, scope });
     return electionIds.length;
+}
+
+async function countActiveCandidatesForElectionIds(electionIds) {
+    if (!Array.isArray(electionIds) || electionIds.length === 0) return 0;
+
+    const elections = await Election.find({ ballotId: { $in: electionIds }, status: 'open' })
+        .select('contests.candidates.studentUserId contests.candidates.email contests.candidates.studentNumber')
+        .lean();
+
+    const candidateKeys = new Set();
+    elections.forEach((election) => {
+        (election.contests || []).forEach((contest) => {
+            (contest.candidates || []).forEach((candidate) => {
+                const candidateKey = candidate.studentUserId || candidate.email || candidate.studentNumber;
+                if (candidateKey) candidateKeys.add(String(candidateKey));
+            });
+        });
+    });
+
+    return candidateKeys.size;
+}
+
+function buildRegisteredVoterFilter(actorRole, actorFaculty) {
+    const filter = {
+        studentNumber: { $exists: true, $ne: '' },
+        role: { $nin: ['usc_president', 'usc_vp'] },
+    };
+
+    if (actorRole === 'faculty_president' && actorFaculty) {
+        filter.faculty = { $regex: new RegExp(`^${actorFaculty}$`, 'i') };
+    }
+
+    return filter;
 }
 
 function canManageRole(actor, targetRole) {
@@ -111,17 +146,44 @@ async function assignUserRole({ actor, targetUserId, targetRole, reason = '', co
         throw err;
     }
 
-    const targetUser = await User.findById(targetUserId).select('_id role faculty').lean();
+    const normalizedTargetRole = normalizeRole(targetRole);
+    const targetUser = await User.findById(targetUserId).select('_id role faculty studentNumber permissions').lean();
     if (!targetUser) {
         const err = new Error('Target user not found');
         err.status = 404;
         throw err;
     }
 
-    if (!DELEGABLE_ROLES.has(normalizeRole(targetRole)) && !ADMIN_SUPER_ROLES.has(normalizeRole(targetRole))) {
+    if (!DELEGABLE_ROLES.has(normalizedTargetRole) && !ADMIN_SUPER_ROLES.has(normalizedTargetRole)) {
         const err = new Error(`Role "${targetRole}" is not assignable.`);
         err.status = 400;
         throw err;
+    }
+
+    if (normalizedTargetRole === 'candidate') {
+        const err = new Error('Candidate role is managed automatically by election status and cannot be assigned manually.');
+        err.status = 400;
+        throw err;
+    }
+
+    if (normalizeRole(targetUser.role) === 'candidate' && normalizedTargetRole !== 'student') {
+        const err = new Error('Candidate accounts cannot be assigned admin or executive roles while they are active candidates.');
+        err.status = 400;
+        throw err;
+    }
+
+    if (ADMIN_RELATED_ROLES.has(normalizedTargetRole) && normalizeRole(targetUser.role) === 'candidate') {
+        const err = new Error('Candidates can never have admin-related roles.');
+        err.status = 400;
+        throw err;
+    }
+
+    if (normalizedTargetRole !== 'student' && !STUDENT_EXEMPT_ROLES.has(normalizedTargetRole)) {
+        if (!targetUser.studentNumber) {
+            const err = new Error('This role requires a valid student account (student number is missing).');
+            err.status = 400;
+            throw err;
+        }
     }
 
     if (!canManageRole(actor, targetRole)) {
@@ -138,7 +200,7 @@ async function assignUserRole({ actor, targetUserId, targetRole, reason = '', co
 
     const fromRole = targetUser.role || null;
     const setFields = {
-        role: targetRole,
+        role: normalizedTargetRole,
         grantedBy: actor._id,
         grantedAt: new Date(),
     };
@@ -152,18 +214,26 @@ async function assignUserRole({ actor, targetUserId, targetRole, reason = '', co
     };
     if (contextElectionId) historyEntry.contextElectionId = contextElectionId;
 
+    const shouldGrantStudentPermission = normalizedTargetRole !== 'student' && !STUDENT_EXEMPT_ROLES.has(normalizedTargetRole);
+    const updateOps = {
+        $set: setFields,
+        $push: { roleHistory: historyEntry },
+    };
+    if (shouldGrantStudentPermission) {
+        updateOps.$addToSet = { permissions: 'student' };
+    } else {
+        updateOps.$pull = { permissions: 'student' };
+    }
+
     await User.updateOne(
         { _id: targetUserId },
-        {
-            $set: setFields,
-            $push: { roleHistory: historyEntry },
-        },
+        updateOps,
         { runValidators: false, bypassDocumentValidation: true }
     );
 }
 
 // 1. Require the elections router
-const electionsRouter = require('./routes/elections');
+const electionsRouter = electionsModule;
 
 // 2. Initialize Express
 const app = express();
@@ -200,8 +270,13 @@ app.post('/api/auth/login', async (req, res) => {
         const match = await bcrypt.compare(password, user.password);
         if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
+        const authRoles = Array.from(new Set([
+            user.role,
+            ...(Array.isArray(user.permissions) ? user.permissions : []),
+        ].filter(Boolean)));
+
         const token = jwt.sign(
-            { userId: user._id, role: user.role },
+            { userId: user._id, role: user.role, roles: authRoles },
             process.env.JWT_SECRET || 'secretkey',
             { expiresIn: '12h' }
         );
@@ -235,6 +310,7 @@ app.get('/api/admin/stats', authMiddleware, requireRole('admin', 'usc_admin', 'u
         });
 
         const totalElections = visibleElectionIds.length;
+        const totalCandidates = await countActiveCandidatesForElectionIds(visibleElectionIds);
         const openElections = await countElectionsForUser({
             role: actorRole,
             faculty: actorFaculty,
@@ -242,10 +318,7 @@ app.get('/api/admin/stats', authMiddleware, requireRole('admin', 'usc_admin', 'u
             scope: 'view',
         });
 
-        // Voter count: faculty president sees only their faculty's students
-        const voterFilter = (actorRole === 'faculty_president' && actorFaculty)
-            ? { role: 'student', faculty: { $regex: new RegExp(`^${actorFaculty}$`, 'i') } }
-            : { role: 'student' };
+        const voterFilter = buildRegisteredVoterFilter(actorRole, actorFaculty);
         const registeredVoters = await User.countDocuments(voterFilter);
         const totalVotes = visibleElectionIds.length > 0
             ? await VoteReceipt.countDocuments({ electionId: { $in: visibleElectionIds } })
@@ -253,7 +326,7 @@ app.get('/api/admin/stats', authMiddleware, requireRole('admin', 'usc_admin', 'u
 
         res.json({
             totalElections,
-            totalCandidates: 0,
+            totalCandidates,
             registeredVoters,
             totalVotes,
             openElections,
@@ -362,7 +435,19 @@ app.post('/api/admin/elections/init', authMiddleware, requireRole('admin'), asyn
         if (!FABRIC_ENABLED) {
             return res.status(503).json({ error: 'Blockchain integration is disabled in this environment.' });
         }
-        await initElection(electionId, electionName);
+
+        const election = await Election.findOne({ ballotId: electionId }).lean();
+        if (!election) {
+            return res.status(404).json({ error: 'Election not found' });
+        }
+
+        await initElection(
+            String(election.ballotId),
+            String(election.title || electionName || electionId),
+            new Date(election.startDate).toISOString(),
+            new Date(election.endDate).toISOString(),
+            JSON.stringify(election.contests || [])
+        );
         res.json({ success: true, message: `Election ${electionId} initialized on blockchain` });
     } catch (err) {
         res.status(500).json({ error: 'Failed to initialize election', details: err.message });
@@ -568,7 +653,13 @@ connectDB()
         console.log('✅ MongoDB connected!');
         console.log(`🗄️ MongoDB database: ${mongoose.connection.name}`);
         console.log(`🔗 Fabric mode: ${FABRIC_ENABLED ? 'enabled' : 'disabled'}`);
-        app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+        return reconcileCandidateRoles()
+            .catch((err) => {
+                console.warn('Candidate role reconciliation skipped at startup:', err.message);
+            })
+            .then(() => {
+                app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+            });
     })
     .catch(err => {
         console.error('❌ MongoDB connection failed:', err);

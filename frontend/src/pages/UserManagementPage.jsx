@@ -24,7 +24,6 @@ const ALL_ROLES = [
   { value: 'faculty_president',label: 'Faculty President' },
   { value: 'councillor',       label: 'Councillor' },
   { value: 'meeting_chair',    label: 'Meeting Chair' },
-  { value: 'candidate',        label: 'Candidate' },
   { value: 'student',          label: 'Student' },
 ]
 
