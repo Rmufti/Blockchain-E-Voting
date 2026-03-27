@@ -11,6 +11,7 @@ const Election = require('./models/Election');
 const authMiddleware = require('./middleware/auth');
 const requireRole = require('./middleware/roles');
 const { submitVoteTransaction, initElection, queryResults } = require('./services/fabricService.js');
+const { __testables: electionPolicies } = require('./routes/elections');
 const FABRIC_ENABLED = (process.env.FABRIC_ENABLED || 'true').toLowerCase() !== 'false';
 
 const ADMIN_SUPER_ROLES = new Set(['admin', 'usc_admin']);
@@ -39,6 +40,25 @@ function normalizeRole(role) {
 
 function normalizeFaculty(value) {
     return value ? String(value).trim().toUpperCase().replace(/\s+/g, '_') : null;
+}
+
+async function countElectionsForUser({ role, faculty, status = null, scope = 'view' }) {
+    const query = status ? { status } : {};
+    const elections = await Election.find(query)
+        .select('restrictedToFaculty voterRestriction status')
+        .lean();
+
+    const policyCheck = scope === 'participate'
+        ? electionPolicies.canParticipateInElection
+        : electionPolicies.canViewElection;
+
+    return elections.filter((election) =>
+        policyCheck({
+            userRole: role,
+            userFaculty: faculty,
+            election,
+        })
+    ).length;
 }
 
 function canManageRole(actor, targetRole) {
@@ -198,17 +218,20 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/admin/stats', authMiddleware, requireRole('admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'), async (req, res) => {
     try {
-        const Election = require('./models/Election');
         const actorRole = normalizeRole(req.role);
-        const actorFaculty = req.faculty ? String(req.faculty).trim().toUpperCase().replace(/\s+/g, '_') : null;
+        const actorFaculty = normalizeFaculty(req.faculty);
 
-        // Faculty presidents only see stats for their own faculty's elections
-        const electionFilter = (actorRole === 'faculty_president' && actorFaculty)
-            ? { restrictedToFaculty: actorFaculty }
-            : {};
-
-        const totalElections = await Election.countDocuments(electionFilter);
-        const openElections = await Election.countDocuments({ ...electionFilter, status: 'open' });
+        const totalElections = await countElectionsForUser({
+            role: actorRole,
+            faculty: actorFaculty,
+            scope: 'view',
+        });
+        const openElections = await countElectionsForUser({
+            role: actorRole,
+            faculty: actorFaculty,
+            status: 'open',
+            scope: 'view',
+        });
 
         // Voter count: faculty president sees only their faculty's students
         const voterFilter = (actorRole === 'faculty_president' && actorFaculty)
@@ -465,10 +488,27 @@ const ALL_VOTER_ROLES = ['student', 'candidate', 'councillor', 'meeting_chair', 
 
 app.get('/api/student/stats', authMiddleware, requireRole(...ALL_VOTER_ROLES), async (req, res) => {
     try {
-        const Election = require('./models/Election');
-        const ongoingElections = await Election.countDocuments({ status: 'open' });
-        const upcomingElections = await Election.countDocuments({ status: 'upcoming' });
-        const pastElections = await Election.countDocuments({ status: 'closed' });
+        const userRole = normalizeRole(req.role);
+        const userFaculty = normalizeFaculty(req.faculty);
+
+        const ongoingElections = await countElectionsForUser({
+            role: userRole,
+            faculty: userFaculty,
+            status: 'open',
+            scope: 'participate',
+        });
+        const upcomingElections = await countElectionsForUser({
+            role: userRole,
+            faculty: userFaculty,
+            status: 'upcoming',
+            scope: 'participate',
+        });
+        const pastElections = await countElectionsForUser({
+            role: userRole,
+            faculty: userFaculty,
+            status: 'closed',
+            scope: 'participate',
+        });
         res.json({
             ongoingElections,
             votesCast: 0,
