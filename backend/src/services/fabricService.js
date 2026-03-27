@@ -110,6 +110,46 @@ async function submitVoteTransaction(electionId, voterHash, candidateId, castAt)
  * @param {string} endDate
  * @param {string} candidatesJson - Stringified array of candidate objects
  */
+/**
+ * Initialize an election on the blockchain (admin use).
+ */
+/*async function initElection(electionId, title, startDate, endDate, candidatesJson) {
+    let gateway;
+    try {
+        const result = await getContract();
+        gateway = result.gateway;
+        const contract = result.contract;
+
+        // 1. Log the incoming arguments to find out which one is missing
+        console.log('--- FABRIC ARGS DEBUG ---');
+        console.log('electionId:', electionId);
+        console.log('title:', title);
+        console.log('startDate:', startDate);
+        console.log('endDate:', endDate);
+        console.log('candidatesJson:', candidatesJson);
+
+        // 2. Safely cast everything to a string to prevent the SDK from crashing
+        const safeElectionId = electionId ? String(electionId) : '';
+        const safeTitle = title ? String(title) : '';
+        const safeStartDate = startDate ? String(startDate) : '';
+        const safeEndDate = endDate ? String(endDate) : '';
+        const safeCandidatesJson = candidatesJson ? String(candidatesJson) : '[]';
+
+        // 3. Pass the safe string variables down to the blockchain
+        await contract.submitTransaction('InitElection', safeElectionId, safeTitle, safeStartDate, safeEndDate, safeCandidatesJson);
+        
+        console.log(`Election ${electionId} initialized on blockchain.`);
+        return true;
+    } catch (error) {
+        if (!error.isFabricUnavailable) {
+            markFabricUnavailable(error);
+        }
+        console.error('Failed to initialize election:', error.message);
+        throw error;
+    } finally {
+        if (gateway) gateway.disconnect();
+    }
+}*/
 async function initElection(electionId, title, startDate, endDate, candidatesJson) {
     let gateway;
     try {
