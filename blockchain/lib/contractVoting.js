@@ -4,23 +4,38 @@ const { Contract } = require('fabric-contract-api');
 
 class contractVoting extends Contract {
 
-    // ADD THIS CONSTRUCTOR: It tells Fabric to drop the 'contractVoting:' prefix
     constructor() {
         super('evoting');
     }
 
-    // Initialize the election
-    async InitElection(ctx, electionID, electionName) {
+    // Initialize the election (Now accepts 5 parameters from the backend)
+    async InitElection(ctx, electionID, title, startDate, endDate, candidatesJson) {
+        
+        // Parse the stringified candidates array back into a real JSON array
+        let candidates = [];
+        try {
+            if (candidatesJson) {
+                candidates = JSON.parse(candidatesJson);
+            }
+        } catch (err) {
+            throw new Error(`Failed to parse candidates JSON: ${err.message}`);
+        }
+
         const election = {
             docType: 'election',
             ID: electionID,
-            Name: electionName,
-            Status: 'OPEN'  
+            Name: title,
+            Status: 'OPEN',
+            startDate: startDate,
+            endDate: endDate,
+            candidates: candidates // Saved to the ledger for easy querying later!
         };
+        
         await ctx.stub.putState(electionID, Buffer.from(JSON.stringify(election)));
-        console.log(`*** ELECTION CREATED: ${electionName} ***`); // Added a log so you can see it work!
+        console.log(`*** ELECTION CREATED WITH DATA: ${title} ***`); 
         return JSON.stringify(election);
     }
+
     // Fetch Election Details for the Frontend
     async GetElection(ctx, electionID) {
         const electionBytes = await ctx.stub.getState(electionID);
@@ -32,9 +47,8 @@ class contractVoting extends Contract {
         return electionBytes.toString();
     }
 
-    // Voting (Core Logic)
-    // FIX 2: Renamed 'CastVotes' to 'CastVote' (Singular) to match test
-    async CastVote(ctx, electionID, studentID, candidateName) {
+    // Voting (Core Logic - Upgraded for Anonymity and Timestamps)
+    async CastVote(ctx, electionID, voterHash, candidateID, castAt) {
         
         // Check Election Status
         const electionBytes = await ctx.stub.getState(electionID);
@@ -45,25 +59,25 @@ class contractVoting extends Contract {
 
         const election = JSON.parse(electionBytes.toString());
         
-        // FIX 3: Check for 'OPEN' (Uppercase)
         if (election.Status !== 'OPEN') {
             throw new Error(`Election ${electionID} is closed`);
         }
 
-        // Check for Double Voting
-        const voteKey = ctx.stub.createCompositeKey('vote', [electionID, studentID]);
+        // Check for Double Voting using the secure hash instead of studentID
+        const voteKey = ctx.stub.createCompositeKey('vote', [electionID, voterHash]);
         const existingVote = await ctx.stub.getState(voteKey);
 
         if (existingVote && existingVote.length > 0) {
-            throw new Error(`FRAUD ALERT: ${studentID} has already voted`);
+            throw new Error(`FRAUD ALERT: This anonymous hash has already voted in this election`);
         }
 
-        // Create Vote Object
+        // Create the highly secure, data-rich Vote Object
         const vote = {
             docType: 'vote',
             electionID: electionID,
-            studentID: studentID,
-            candidate: candidateName,
+            voterHash: voterHash, // Identity hidden!
+            candidateID: candidateID,
+            castAt: castAt        // Timestamp recorded!
         };
 
         // Save to Ledger
@@ -72,18 +86,18 @@ class contractVoting extends Contract {
         return JSON.stringify(vote);
     }
 
-    // Getter Method
-    async getVote(ctx, electionID, studentID) {
-        const voteKey = ctx.stub.createCompositeKey('vote', [electionID, studentID]);
+    // Getter Method (Updated to look up by hash)
+    async getVote(ctx, electionID, voterHash) {
+        const voteKey = ctx.stub.createCompositeKey('vote', [electionID, voterHash]);
         const voteBytes = await ctx.stub.getState(voteKey);
 
         if (!voteBytes || voteBytes.length === 0) {
-            throw new Error(`Student ${studentID} has not voted yet`);
+            throw new Error(`Vote not found for this hash`);
         }
         return voteBytes.toString();
     }
 
-    // Tally Votes
+    // Tally Votes (Updated to read candidateID)
     async QueryResults(ctx, electionID) {
         const queryString = {
             selector: {
@@ -100,7 +114,8 @@ class contractVoting extends Contract {
             const strValue = Buffer.from(result.value.value.toString()).toString('utf8');
             const record = JSON.parse(strValue);
             
-            const candidate = record.candidate;
+            // Look up the ID instead of a hardcoded name
+            const candidate = record.candidateID;
             if (results[candidate]) {
                 results[candidate]++;
             } else {

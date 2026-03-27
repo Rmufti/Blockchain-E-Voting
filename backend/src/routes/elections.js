@@ -1,13 +1,18 @@
 // backend/src/routes/elections.js
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto'); // <-- ADDED: For secure voter hashing
 const { v4: uuidv4 } = require('uuid');
 const authMiddleware = require('../middleware/auth');
 const requireRole = require('../middleware/roles');
 const Election = require('../models/Election');
+<<<<<<< Updated upstream
 const { User, hasUserVoted, recordVoteReceipt } = require('../db');
 const { initElection, getElection } = require('../services/fabricService');
 const { submitVoteTransaction } = require('../services/fabricService');
+=======
+const { initElection, getElection, submitVoteTransaction } = require('../services/fabricService');
+>>>>>>> Stashed changes
 
 const FABRIC_ENABLED = (process.env.FABRIC_ENABLED || 'true').toLowerCase() !== 'false';
 
@@ -269,6 +274,7 @@ router.get('/', authMiddleware, async (req, res) => {
         const role = normalizeRole(req.role);
         const manageScope = String(req.query.scope || '').toLowerCase() === 'manage';
 
+<<<<<<< Updated upstream
         if (manageScope && canManageElections(role)) {
             if (isPrivilegedViewer(role) || isHigherThanFacultyPresident(role)) {
                 query = {};
@@ -294,6 +300,10 @@ router.get('/', authMiddleware, async (req, res) => {
             }
 
             // Student sees only open elections eligible for their faculty.
+=======
+        if (req.role === 'student') {
+            const userFaculty = req.faculty; 
+>>>>>>> Stashed changes
             query = {
                 status: 'open',
                 $or: restrictionMatch,
@@ -369,13 +379,24 @@ router.get('/:ballotId', authMiddleware, async (req, res) => {
         const election = await Election.findOne({ ballotId: req.params.ballotId });
         if (!election) return res.status(404).json({ error: 'Election not found' });
 
+<<<<<<< Updated upstream
         // Students: verify they're allowed to view this ballot
         if (!canViewElection({ userRole: req.role, userFaculty: req.faculty, election })) {
             return res.status(403).json({ error: 'You are not eligible for this ballot' });
+=======
+        if (req.role === 'student') {
+            const userFaculty = req.faculty;
+            if (
+                election.restrictedToFaculty &&
+                election.restrictedToFaculty !== userFaculty
+            ) {
+                return res.status(403).json({ error: 'You are not eligible for this ballot' });
+            }
+>>>>>>> Stashed changes
         }
 
-        // --- NEW BLOCKCHAIN FETCH LOGIC ---
         let blockchainData = null;
+<<<<<<< Updated upstream
         if (FABRIC_ENABLED) {
             try {
                 // Ask the smart contract for the official ledger state
@@ -386,17 +407,26 @@ router.get('/:ballotId', authMiddleware, async (req, res) => {
                 }
                 // We don't fail the whole request here, just in case the network is temporarily down
             }
+=======
+        try {
+            blockchainData = await getElection(req.params.ballotId);
+        } catch (bcErr) {
+            console.warn(`Could not fetch blockchain data for ${req.params.ballotId}:`, bcErr.message);
+>>>>>>> Stashed changes
         }
 
-        // Combine MongoDB data with Blockchain data
         const responseData = {
+<<<<<<< Updated upstream
             ...election.toObject(), // Convert Mongoose document to standard JSON
             contests: await sanitizeContestsToVerifiedStudents(election.contests || []),
             blockchainState: blockchainData,
+=======
+            ...election.toObject(), 
+            blockchainState: blockchainData 
+>>>>>>> Stashed changes
         };
 
         res.json(responseData);
-        // ----------------------------------
 
     } catch (err) {
         console.error('GET /elections/:ballotId error:', err);
@@ -409,6 +439,7 @@ router.get('/:ballotId', authMiddleware, async (req, res) => {
 router.post('/', authMiddleware, async (req, res) => {
     const {
         title,
+<<<<<<< Updated upstream
         electionType,   // 'presidential' | 'faculty'
         purpose,
         managedByRole,
@@ -418,6 +449,13 @@ router.post('/', authMiddleware, async (req, res) => {
         restrictedToFaculty, // null for presidential, faculty string for faculty elections
         voterRestriction,
         contests,            // array of contest objects from the frontend form
+=======
+        electionType,   
+        startDate,
+        endDate,
+        restrictedToFaculty, 
+        contests,            
+>>>>>>> Stashed changes
     } = req.body;
 
     if (!canManageElections(req.role)) {
@@ -432,6 +470,7 @@ router.post('/', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'At least one contest is required' });
     }
 
+<<<<<<< Updated upstream
     // Presidential elections are open to everyone — ignore any restriction
     const finalRestriction = electionType === 'presidential' ? null : normalizeFaculty(restrictedToFaculty);
 
@@ -444,14 +483,17 @@ router.post('/', authMiddleware, async (req, res) => {
             return res.status(403).json({ error: 'Faculty presidents can only create elections for their own faculty.' });
         }
     }
+=======
+    const finalRestriction = electionType === 'presidential' ? null : (restrictedToFaculty || null);
+>>>>>>> Stashed changes
 
-    // Validate faculty value if provided
     if (finalRestriction && !KNOWN_FACULTIES.includes(finalRestriction)) {
         return res.status(400).json({
             error: `Unknown faculty "${finalRestriction}". Valid values: ${KNOWN_FACULTIES.join(', ')}`,
         });
     }
 
+<<<<<<< Updated upstream
     const finalVoterRestriction = voterRestriction || 'all_students';
     if (!['all_students', 'faculty_exec_only'].includes(finalVoterRestriction)) {
         return res.status(400).json({ error: 'Invalid voterRestriction value.' });
@@ -463,6 +505,25 @@ router.post('/', authMiddleware, async (req, res) => {
     // Build ballot ID
     const ballotId = `ballot-${Date.now()}-${uuidv4().substring(0, 6)}`;
 
+=======
+    const ballotId = `ballot-${Date.now()}-${uuidv4().substring(0, 6)}`;
+
+    const normalisedContests = contests.map((contest, ci) => ({
+        id: contest.id || `contest-${ci + 1}`,
+        title: contest.title,
+        instructionText: contest.instructionText || '',
+        ruleType: contest.ruleType || 'single',
+        required: contest.required !== false,
+        maxSelections: contest.maxSelections || null,
+        restrictionFaculty: contest.restrictionFaculty || finalRestriction || null,
+        candidates: (contest.candidates || []).map((c, idx) => ({
+            id: c.id || `c${ci}-${idx}`,
+            name: c.name,
+            description: c.description || '',
+        })),
+    }));
+
+>>>>>>> Stashed changes
     try {
         const normalisedContests = await normalizeAndValidateContests(contests, finalRestriction);
 
@@ -483,6 +544,7 @@ router.post('/', authMiddleware, async (req, res) => {
             createdBy: req.userId,
         });
 
+<<<<<<< Updated upstream
         // 2. Initialize on blockchain (non-blocking — if it fails we still have the DB record)
         if (FABRIC_ENABLED) {
             try {
@@ -494,6 +556,32 @@ router.post('/', authMiddleware, async (req, res) => {
                 console.warn(`Blockchain init failed for ${ballotId} (will retry later):`, bcErr.message);
                 // Don't fail the request — admin can retry via the reinit endpoint
             }
+=======
+        // 2. Initialize on blockchain
+        try {
+            // <-- ADDED: Flatten candidates for the blockchain ledger
+            const blockchainCandidates = [];
+            normalisedContests.forEach(contest => {
+                contest.candidates.forEach(c => {
+                    blockchainCandidates.push({ id: c.id, name: c.name });
+                });
+            });
+
+            // <-- ADDED: Pass dates and candidates to Fabric Service
+            await initElection(
+                ballotId, 
+                title, 
+                startDate, 
+                endDate, 
+                JSON.stringify(blockchainCandidates)
+            );
+            
+            election.blockchainInitialized = true;
+            await election.save();
+            console.log(`Blockchain election initialized: ${ballotId}`);
+        } catch (bcErr) {
+            console.warn(`Blockchain init failed for ${ballotId} (will retry later):`, bcErr.message);
+>>>>>>> Stashed changes
         }
 
         res.status(201).json({
@@ -501,7 +589,7 @@ router.post('/', authMiddleware, async (req, res) => {
             election,
             message: election.blockchainInitialized
                 ? 'Election created and initialized on blockchain.'
-                : 'Election created in DB. Blockchain initialization pending (network may be down).',
+                : 'Election created in DB. Blockchain initialization pending.',
         });
     } catch (err) {
         console.error('POST /elections error:', err);
@@ -510,8 +598,12 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // ── PUT /api/elections/:ballotId ─────────────────────────────────────────────
+<<<<<<< Updated upstream
 // Admin only: edit an existing election (metadata + contests)
 router.put('/:ballotId', authMiddleware, async (req, res) => {
+=======
+router.put('/:ballotId', authMiddleware, requireRole('admin'), async (req, res) => {
+>>>>>>> Stashed changes
     try {
         if (!canManageElections(req.role)) {
             return res.status(403).json({ error: 'Forbidden: insufficient permissions' });
@@ -633,6 +725,7 @@ router.post('/:ballotId/blockchain-init', authMiddleware, async (req, res) => {
         const election = await Election.findOne({ ballotId: req.params.ballotId });
         if (!election) return res.status(404).json({ error: 'Election not found' });
 
+<<<<<<< Updated upstream
         if (normalizeRole(req.role) === 'faculty_president') {
             if (normalizeFaculty(election.restrictedToFaculty) !== normalizeFaculty(req.faculty)) {
                 return res.status(403).json({ error: 'Faculty presidents can only initialize elections in their own faculty.' });
@@ -640,6 +733,25 @@ router.post('/:ballotId/blockchain-init', authMiddleware, async (req, res) => {
         }
 
         await initElection(election.ballotId, election.title);
+=======
+        // <-- ADDED: Rebuild candidate array for the retry attempt
+        const blockchainCandidates = [];
+        election.contests.forEach(contest => {
+            contest.candidates.forEach(c => {
+                blockchainCandidates.push({ id: c.id, name: c.name });
+            });
+        });
+
+        // <-- ADDED: Pass dates and candidates to the retry function
+        await initElection(
+            election.ballotId, 
+            election.title,
+            election.startDate,
+            election.endDate,
+            JSON.stringify(blockchainCandidates)
+        );
+        
+>>>>>>> Stashed changes
         election.blockchainInitialized = true;
         await election.save();
 
@@ -650,13 +762,13 @@ router.post('/:ballotId/blockchain-init', authMiddleware, async (req, res) => {
     }
 });
 
-// Add this route near the bottom of backend/src/routes/elections.js
 // ── POST /api/elections/:ballotId/submit ────────────────────────────────────
 router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
     try {
         const { ballotId } = req.params;
         const { selections } = req.body;
         
+<<<<<<< Updated upstream
         const election = await Election.findOne({ ballotId }).lean();
         if (!election) {
             return res.status(404).json({ error: 'Election not found.' });
@@ -687,6 +799,23 @@ router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
 
         // Send to the Hyperledger Fabric Smart Contract.
         const txResult = await submitVoteTransaction(ballotId, voterId, candidateId);
+=======
+        const userId = req.userId; 
+        const contestId = Object.keys(selections)[0];
+        const candidateId = selections[contestId][0]; 
+
+        // <-- ADDED: 1. Generate the anonymous voter hash!
+        const voterHash = crypto
+            .createHash('sha256')
+            .update(userId.toString() + ballotId.toString())
+            .digest('hex');
+
+        // <-- ADDED: 2. Generate the timestamp
+        const castAt = new Date().toISOString();
+
+        // <-- ADDED: 3. Send the secure hash and timestamp to Fabric
+        const txResult = await submitVoteTransaction(ballotId, voterHash, candidateId, castAt);
+>>>>>>> Stashed changes
 
         // Persist immutable receipt (unique index also prevents race-condition duplicates).
         await recordVoteReceipt(voterId, ballotId, selections, String(txResult));
@@ -694,12 +823,17 @@ router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
         res.json({ 
             success: true, 
             transactionId: txResult, 
-            message: 'Vote successfully secured on the blockchain.' 
+            message: 'Vote successfully secured on the blockchain.',
+            castAt: castAt
         });
 
     } catch (err) {
         console.error('Failed to submit vote to blockchain:', err);
+<<<<<<< Updated upstream
         if ((err.message && err.message.includes('already voted')) || err?.code === 11000) {
+=======
+        if (err.message && err.message.includes('already voted') || err.message.includes('already exists')) {
+>>>>>>> Stashed changes
             return res.status(400).json({ error: 'You have already voted in this election.' });
         }
 
@@ -712,6 +846,7 @@ router.post('/:ballotId/submit', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+<<<<<<< Updated upstream
 module.exports.KNOWN_FACULTIES = KNOWN_FACULTIES;
 module.exports.__testables = {
     normalizeFaculty,
@@ -721,3 +856,6 @@ module.exports.__testables = {
     canParticipateInElection,
     canViewElection,
 };
+=======
+module.exports.KNOWN_FACULTIES = KNOWN_FACULTIES;
+>>>>>>> Stashed changes

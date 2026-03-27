@@ -67,21 +67,24 @@ async function getContract() {
 
 /**
  * Submit a vote to the blockchain.
- * @param {string} electionId - The election identifier (maps to your ballotId)
- * @param {string} voterId    - The student number or unique voter ID
+ * @param {string} electionId  - The election identifier (maps to your ballotId)
+ * @param {string} voterHash   - The anonymous SHA-256 hash of the user and election
  * @param {string} candidateId - The selected candidate ID
+ * @param {string} castAt      - ISO Timestamp of when the vote was cast
  * @returns {string} transactionId or result string
  */
-async function submitVoteTransaction(electionId, voterId, candidateId) {
+async function submitVoteTransaction(electionId, voterHash, candidateId, castAt) {
     let gateway;
     try {
         const result = await getContract();
         gateway = result.gateway;
         const contract = result.contract;
 
-        console.log(`Submitting vote: election=${electionId}, voter=${voterId}, candidate=${candidateId}`);
+        console.log(`Submitting vote: election=${electionId}, voterHash=${voterHash}, candidate=${candidateId}, castAt=${castAt}`);
 
-        const txResult = await contract.submitTransaction('CastVote', electionId, voterId, candidateId);
+        // IMPORTANT: The arguments passed here must exactly match the order 
+        // expected by your 'CastVote' function in your chaincode.
+        const txResult = await contract.submitTransaction('CastVote', electionId, voterHash, candidateId, castAt);
 
         console.log('Vote submitted to blockchain successfully.');
         return txResult && txResult.length > 0 ? txResult.toString() : 'VoteRecorded';
@@ -102,16 +105,21 @@ async function submitVoteTransaction(electionId, voterId, candidateId) {
 /**
  * Initialize an election on the blockchain (admin use).
  * @param {string} electionId
- * @param {string} electionName
+ * @param {string} title
+ * @param {string} startDate
+ * @param {string} endDate
+ * @param {string} candidatesJson - Stringified array of candidate objects
  */
-async function initElection(electionId, electionName) {
+async function initElection(electionId, title, startDate, endDate, candidatesJson) {
     let gateway;
     try {
         const result = await getContract();
         gateway = result.gateway;
         const contract = result.contract;
 
-        await contract.submitTransaction('InitElection', electionId, electionName);
+        // Pass all the new metadata down to the blockchain
+        await contract.submitTransaction('InitElection', electionId, title, startDate, endDate, candidatesJson);
+        
         console.log(`Election ${electionId} initialized on blockchain.`);
         return true;
     } catch (error) {
@@ -149,6 +157,7 @@ async function queryResults(electionId) {
         if (gateway) gateway.disconnect();
     }
 }
+
 /**
  * Fetch the details of a specific election to display to the voter.
  * @param {string} electionId
@@ -161,7 +170,6 @@ async function getElection(electionId) {
         gateway = result.gateway;
         const contract = result.contract;
 
-        // Note: 'GetElection' or 'ReadElection' must match the exact function name in your Chaincode
         const raw = await contract.evaluateTransaction('GetElection', electionId);
         
         console.log(`Successfully fetched election ${electionId} from blockchain.`);
@@ -176,7 +184,6 @@ async function getElection(electionId) {
         if (gateway) gateway.disconnect();
     }
 }
-
 
 module.exports = {
     submitVoteTransaction,
