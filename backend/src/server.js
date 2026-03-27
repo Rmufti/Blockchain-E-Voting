@@ -4,13 +4,137 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const mongoose = require('mongoose');
 
 const { connectDB, findUserByEmail, createUser, verifyVoterEligibility, recordVoteReceipt, User } = require('./db.js');
+const Election = require('./models/Election');
 const authMiddleware = require('./middleware/auth');
 const requireRole = require('./middleware/roles');
 const { submitVoteTransaction, initElection, queryResults } = require('./services/fabricService.js');
+const FABRIC_ENABLED = (process.env.FABRIC_ENABLED || 'true').toLowerCase() !== 'false';
 
-// 1. Require the new elections router
+const ADMIN_SUPER_ROLES = new Set(['admin', 'usc_admin']);
+const DELEGABLE_ROLES = new Set([
+    'usc_president',
+    'usc_vp',
+    'faculty_president',
+    'councillor',
+    'meeting_chair',
+    'candidate',
+    'student',
+]);
+const ROLE_RANK = {
+    usc_president: 1,
+    usc_vp: 2,
+    faculty_president: 3,
+    councillor: 4,
+    meeting_chair: 4,
+    candidate: 5,
+    student: 6,
+};
+
+function normalizeRole(role) {
+    return role ? String(role).trim().toLowerCase() : '';
+}
+
+function normalizeFaculty(value) {
+    return value ? String(value).trim().toUpperCase().replace(/\s+/g, '_') : null;
+}
+
+function canManageRole(actor, targetRole) {
+    const actorRole = normalizeRole(actor.role);
+    const role = normalizeRole(targetRole);
+
+    if (!role) return false;
+    if (ADMIN_SUPER_ROLES.has(actorRole)) return true;
+    if (ADMIN_SUPER_ROLES.has(role)) return false;
+
+    const actorRank = ROLE_RANK[actorRole];
+    const targetRank = ROLE_RANK[role];
+    if (!actorRank || !targetRank) return false;
+
+    return actorRank < targetRank;
+}
+
+function checkFacultyScope(actor, targetUser, targetRole) {
+    const actorRole = normalizeRole(actor.role);
+    if (ADMIN_SUPER_ROLES.has(actorRole) || actorRole === 'usc_president' || actorRole === 'usc_vp') return true;
+
+    if (actorRole === 'faculty_president') {
+        return normalizeFaculty(targetUser.faculty) === normalizeFaculty(actor.faculty);
+    }
+
+    return false;
+}
+
+async function getActorUser(req) {
+    const actor = await User.findById(req.userId)
+        .select('_id fullName email role faculty permissions')
+        .lean();
+    return actor;
+}
+
+const FACULTY_SCOPED_ROLES = new Set(['faculty_president', 'councillor', 'meeting_chair']);
+
+async function assignUserRole({ actor, targetUserId, targetRole, reason = '', contextElectionId = null, faculty = null }) {
+    if (String(actor?._id) === String(targetUserId)) {
+        const err = new Error('You cannot change your own role.');
+        err.status = 400;
+        throw err;
+    }
+
+    const targetUser = await User.findById(targetUserId).select('_id role faculty').lean();
+    if (!targetUser) {
+        const err = new Error('Target user not found');
+        err.status = 404;
+        throw err;
+    }
+
+    if (!DELEGABLE_ROLES.has(normalizeRole(targetRole)) && !ADMIN_SUPER_ROLES.has(normalizeRole(targetRole))) {
+        const err = new Error(`Role "${targetRole}" is not assignable.`);
+        err.status = 400;
+        throw err;
+    }
+
+    if (!canManageRole(actor, targetRole)) {
+        const err = new Error('You do not have permission to assign this role.');
+        err.status = 403;
+        throw err;
+    }
+
+    if (!checkFacultyScope(actor, targetUser, targetRole)) {
+        const err = new Error('You do not have faculty scope to assign this role.');
+        err.status = 403;
+        throw err;
+    }
+
+    const fromRole = targetUser.role || null;
+    const setFields = {
+        role: targetRole,
+        grantedBy: actor._id,
+        grantedAt: new Date(),
+    };
+    if (faculty) setFields.faculty = String(faculty).trim().toUpperCase().replace(/\s+/g, '_');
+    const historyEntry = {
+        from: fromRole,
+        to: targetRole,
+        by: actor._id,
+        reason,
+        timestamp: new Date(),
+    };
+    if (contextElectionId) historyEntry.contextElectionId = contextElectionId;
+
+    await User.updateOne(
+        { _id: targetUserId },
+        {
+            $set: setFields,
+            $push: { roleHistory: historyEntry },
+        },
+        { runValidators: false, bypassDocumentValidation: true }
+    );
+}
+
+// 1. Require the elections router
 const electionsRouter = require('./routes/elections');
 
 // 2. Initialize Express
@@ -19,9 +143,8 @@ const app = express();
 // 3. Set up Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/api/elections', electionsRouter);
 
-// 4. Register the new elections router AFTER app and express.json() are ready
+// 4. Register the elections router (ONCE only)
 app.use('/api/elections', electionsRouter);
 
 
@@ -73,30 +196,127 @@ app.post('/api/auth/login', async (req, res) => {
 
 // ─── ADMIN ROUTES ────────────────────────────────────────────────────────────
 
-app.get('/api/admin/stats', authMiddleware, requireRole('admin'), async (req, res) => {
+app.get('/api/admin/stats', authMiddleware, requireRole('admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'), async (req, res) => {
     try {
+        const Election = require('./models/Election');
+        const actorRole = normalizeRole(req.role);
+        const actorFaculty = req.faculty ? String(req.faculty).trim().toUpperCase().replace(/\s+/g, '_') : null;
+
+        // Faculty presidents only see stats for their own faculty's elections
+        const electionFilter = (actorRole === 'faculty_president' && actorFaculty)
+            ? { restrictedToFaculty: actorFaculty }
+            : {};
+
+        const totalElections = await Election.countDocuments(electionFilter);
+        const openElections = await Election.countDocuments({ ...electionFilter, status: 'open' });
+
+        // Voter count: faculty president sees only their faculty's students
+        const voterFilter = (actorRole === 'faculty_president' && actorFaculty)
+            ? { role: 'student', faculty: { $regex: new RegExp(`^${actorFaculty}$`, 'i') } }
+            : { role: 'student' };
+        const registeredVoters = await User.countDocuments(voterFilter);
+
         res.json({
-            totalElections: 1,
-            totalCandidates: 5,
-            registeredVoters: 150,
-            totalVotes: 89
+            totalElections,
+            totalCandidates: 0,
+            registeredVoters,
+            totalVotes: 0,
+            openElections,
         });
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch stats' });
     }
 });
 
-app.get('/api/elections/current', authMiddleware, requireRole('admin'), async (req, res) => {
+// Access delegation endpoint with hierarchy enforcement.
+app.post('/api/admin/access/delegate', authMiddleware, requireRole('admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'), async (req, res) => {
     try {
-        res.json({
-            electionId: 'ballot-2026-001',
-            title: 'USC Election 2026',
-            status: 'active',
-            startDate: '2026-01-01',
-            endDate: '2026-02-15'
+        const actor = await getActorUser(req);
+        if (!actor) return res.status(401).json({ error: 'Actor not found' });
+
+        const { targetUserId, targetRole, reason = '', faculty } = req.body;
+        if (!targetUserId || !targetRole) {
+            return res.status(400).json({ error: 'targetUserId and targetRole are required' });
+        }
+        if (FACULTY_SCOPED_ROLES.has(String(targetRole).toLowerCase()) && !faculty) {
+            return res.status(400).json({ error: `faculty is required when assigning role "${targetRole}"` });
+        }
+
+        await assignUserRole({
+            actor,
+            targetUserId,
+            targetRole,
+            reason,
+            faculty: faculty || null,
         });
+
+        res.json({ success: true, message: `Role updated to ${targetRole}` });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch current election' });
+        const status = err.status || 500;
+        res.status(status).json({ error: err.message || 'Failed to delegate access' });
+    }
+});
+
+// Revoke delegated access back to student role.
+app.post('/api/admin/access/revoke', authMiddleware, requireRole('admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'), async (req, res) => {
+    try {
+        const actor = await getActorUser(req);
+        if (!actor) return res.status(401).json({ error: 'Actor not found' });
+
+        const { targetUserId, reason = '' } = req.body;
+        if (!targetUserId) {
+            return res.status(400).json({ error: 'targetUserId is required' });
+        }
+
+        await assignUserRole({
+            actor,
+            targetUserId,
+            targetRole: 'student',
+            reason: reason || 'Access revoked',
+        });
+
+        res.json({ success: true, message: 'Access revoked and role reverted to student' });
+    } catch (err) {
+        const status = err.status || 500;
+        res.status(status).json({ error: err.message || 'Failed to revoke access' });
+    }
+});
+
+// Apply election winners role updates only after election is closed.
+app.post('/api/admin/elections/:ballotId/winners/roles', authMiddleware, async (req, res) => {
+    try {
+        const actor = await getActorUser(req);
+        if (!actor) return res.status(401).json({ error: 'Actor not found' });
+
+        const election = await Election.findOne({ ballotId: req.params.ballotId }).lean();
+        if (!election) return res.status(404).json({ error: 'Election not found' });
+        if (election.status !== 'closed') {
+            return res.status(400).json({ error: 'Winner role updates are only allowed after election is closed.' });
+        }
+
+        const { assignments = [], reason = '' } = req.body;
+        if (!Array.isArray(assignments) || assignments.length === 0) {
+            return res.status(400).json({ error: 'assignments array is required' });
+        }
+
+        for (const assignment of assignments) {
+            if (!assignment.userId || !assignment.role) {
+                return res.status(400).json({ error: 'Each assignment needs userId and role' });
+            }
+
+            await assignUserRole({
+                actor,
+                targetUserId: assignment.userId,
+                targetRole: assignment.role,
+                reason: reason || `Winner role applied for election ${req.params.ballotId}`,
+                contextElectionId: req.params.ballotId,
+            });
+        }
+
+        res.json({ success: true, message: 'Winner role assignments applied' });
+    } catch (err) {
+        const status = err.status || 500;
+        res.status(status).json({ error: err.message || 'Failed to apply winner roles' });
     }
 });
 
@@ -104,6 +324,9 @@ app.get('/api/elections/current', authMiddleware, requireRole('admin'), async (r
 app.post('/api/admin/elections/init', authMiddleware, requireRole('admin'), async (req, res) => {
     const { electionId, electionName } = req.body;
     try {
+        if (!FABRIC_ENABLED) {
+            return res.status(503).json({ error: 'Blockchain integration is disabled in this environment.' });
+        }
         await initElection(electionId, electionName);
         res.json({ success: true, message: `Election ${electionId} initialized on blockchain` });
     } catch (err) {
@@ -115,6 +338,9 @@ app.post('/api/admin/elections/init', authMiddleware, requireRole('admin'), asyn
 app.get('/api/admin/results/:electionId', authMiddleware, requireRole('admin'), async (req, res) => {
     const { electionId } = req.params;
     try {
+        if (!FABRIC_ENABLED) {
+            return res.status(503).json({ error: 'Blockchain integration is disabled in this environment.' });
+        }
         const tally = await queryResults(electionId);
         const resultsArray = Object.entries(tally).map(([candidateName, votes]) => ({
             candidateName,
@@ -128,203 +354,148 @@ app.get('/api/admin/results/:electionId', authMiddleware, requireRole('admin'), 
             results: resultsArray,
         });
     } catch (err) {
-        // Fallback mock if blockchain unavailable
-        console.warn('Blockchain unavailable, returning mock results:', err.message);
+        console.warn('Blockchain unavailable, returning empty results:', err.message);
         res.json({
             electionId,
-            title: 'USC Election 2026',
-            totalVotes: 3,
-            results: [
-                { candidateName: 'John Smith', votes: 1 },
-                { candidateName: 'Sarah Johnson', votes: 2 },
-            ],
+            title: 'Election Results',
+            totalVotes: 0,
+            results: [],
         });
+    }
+});
+
+// Admin: search ALL users (super-admin only)
+app.get('/api/admin/users/search', authMiddleware, requireRole('admin', 'faculty_president'), async (req, res) => {
+    const { q } = req.query;
+    const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+        const actor = await getActorUser(req);
+        const term = (q || '').trim();
+        const filter = term
+            ? {
+                $or: [
+                    { fullName: new RegExp(escapeRegex(term), 'i') },
+                    { email: new RegExp(escapeRegex(term), 'i') },
+                    { studentNumber: new RegExp(escapeRegex(term), 'i') },
+                ],
+            }
+            : {};
+        
+        // Faculty presidents can only search users in their faculty
+        if (actor.role && normalizeRole(actor.role) === 'faculty_president') {
+            filter.faculty = normalizeFaculty(actor.faculty);
+        }
+        
+        const users = await User.find(filter)
+            .select('_id fullName email studentNumber faculty role')
+            .sort({ fullName: 1 })
+            .limit(20)
+            .lean();
+        res.json({ users });
+    } catch (err) {
+        console.error('User search error:', err);
+        res.status(500).json({ error: 'Search failed' });
+    }
+});
+
+// Admin: search students (by name, email, or studentNumber)
+app.get('/api/admin/students/search', authMiddleware, requireRole('admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'), async (req, res) => {
+    const { q, faculty } = req.query;
+
+    const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const buildFacultyRegex = (value) => {
+        const normalized = normalizeFaculty(value);
+        if (!normalized) return null;
+
+        const tokens = normalized.split('_').filter(Boolean).map((part) => escapeRegex(part));
+        if (tokens.length === 0) return null;
+
+        const tokenSequence = tokens.join('[\\s_-]+');
+        return new RegExp(`(^|[\\s_-])${tokenSequence}($|[\\s_-])`, 'i');
+    };
+
+    try {
+        const term = (q || '').trim();
+        const normalizedFaculty = faculty ? String(faculty).trim().toUpperCase().replace(/\s+/g, '_') : null;
+        const baseFilter = { role: 'student' };
+        const actorRole = normalizeRole(req.role);
+        const actorFaculty = req.faculty ? String(req.faculty).trim().toUpperCase().replace(/\s+/g, '_') : null;
+
+        if (actorRole === 'faculty_president') {
+            if (!actorFaculty) {
+                return res.status(403).json({ error: 'Faculty president account is missing faculty scope.' });
+            }
+            const facultyRegex = buildFacultyRegex(actorFaculty);
+            if (facultyRegex) {
+                baseFilter.faculty = { $regex: facultyRegex };
+            }
+        } else if (normalizedFaculty) {
+            const facultyRegex = buildFacultyRegex(normalizedFaculty);
+            if (facultyRegex) {
+                baseFilter.faculty = { $regex: facultyRegex };
+            }
+        }
+        const filter = term
+            ? {
+                ...baseFilter,
+                $or: [
+                    { fullName: new RegExp(escapeRegex(term), 'i') },
+                    { email: new RegExp(escapeRegex(term), 'i') },
+                    { studentNumber: new RegExp(escapeRegex(term), 'i') },
+                ],
+            }
+            : baseFilter;
+
+        const students = await User.find(filter)
+            .select('_id fullName email studentNumber faculty')
+            .sort({ fullName: 1 })
+            .limit(20)
+            .lean();
+
+        res.json({ students, sourceDb: mongoose.connection.name });
+    } catch (err) {
+        console.error('Student search error:', err);
+        res.status(500).json({ error: 'Search failed' });
     }
 });
 
 // ─── STUDENT ROUTES ──────────────────────────────────────────────────────────
 
-app.get('/api/student/stats', authMiddleware, requireRole('student'), async (req, res) => {
+const ALL_VOTER_ROLES = ['student', 'candidate', 'councillor', 'meeting_chair', 'faculty_president', 'usc_president', 'usc_vp', 'admin', 'usc_admin'];
+
+app.get('/api/student/stats', authMiddleware, requireRole(...ALL_VOTER_ROLES), async (req, res) => {
     try {
+        const Election = require('./models/Election');
+        const ongoingElections = await Election.countDocuments({ status: 'open' });
+        const upcomingElections = await Election.countDocuments({ status: 'upcoming' });
+        const pastElections = await Election.countDocuments({ status: 'closed' });
         res.json({
-            ongoingElections: 1,
+            ongoingElections,
             votesCast: 0,
-            upcomingElections: 2,
-            pastElections: 6,
+            upcomingElections,
+            pastElections,
         });
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch student stats' });
     }
 });
 
-app.get('/api/voting-receipts', authMiddleware, requireRole('student'), async (req, res) => {
+app.get('/api/voting-receipts', authMiddleware, requireRole(...ALL_VOTER_ROLES), async (req, res) => {
     try {
-        // In production: query VoteReceipt collection filtered by req.userId
         res.json({ receipts: [] });
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch receipts' });
     }
 });
 
-app.get('/api/ballots', authMiddleware, requireRole('student'), async (req, res) => {
-    try {
-        res.json({
-            currentBallots: [
-                {
-                    ballotId: 'ballot-2026-001',
-                    title: 'USC Election 2026',
-                    startDate: '2026-01-01',
-                    endDate: '2026-02-15',
-                    status: 'open',
-                }
-            ]
-        });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch ballots' });
-    }
-});
-
-app.get('/api/ballots/:ballotId', authMiddleware, requireRole('student'), async (req, res) => {
-    try {
-        const { ballotId } = req.params;
-        // In production, fetch from DB. For now return mock based on ballotId.
-        res.json({
-            ballotId,
-            title: 'USC Election 2026',
-            contests: [
-                {
-                    id: 'contest-1',
-                    title: 'USC President',
-                    instructionText: 'Rank candidates in order of preference (1 = most preferred)',
-                    ruleType: 'ranked',
-                    required: true,
-                    restrictionFaculty: null,
-                    candidates: [
-                        { id: 'c1', name: 'John Smith', description: 'Faculty of Science' },
-                        { id: 'c2', name: 'Sarah Johnson', description: 'Faculty of Arts' },
-                        { id: 'c3', name: 'Michael Chen', description: 'Faculty of Engineering' },
-                    ],
-                },
-                {
-                    id: 'contest-2',
-                    title: 'Science President',
-                    instructionText: 'Select one candidate',
-                    ruleType: 'single',
-                    required: true,
-                    restrictionFaculty: 'SCIENCE',
-                    candidates: [
-                        { id: 'c4', name: 'Alice Brown', description: 'Science Faculty Candidate' },
-                        { id: 'c5', name: 'Bob Wilson', description: 'Science Faculty Candidate' },
-                    ],
-                },
-                {
-                    id: 'contest-3',
-                    title: 'Science Councillor',
-                    instructionText: 'Select up to 6 candidates',
-                    ruleType: 'multi',
-                    required: true,
-                    maxSelections: 6,
-                    restrictionFaculty: 'SCIENCE',
-                    candidates: [
-                        { id: 'c6', name: 'David Lee', description: 'Science Councillor Candidate' },
-                        { id: 'c7', name: 'Emma Davis', description: 'Science Councillor Candidate' },
-                        { id: 'c8', name: 'Frank Miller', description: 'Science Councillor Candidate' },
-                        { id: 'c9', name: 'Grace Taylor', description: 'Science Councillor Candidate' },
-                        { id: 'c10', name: 'Henry White', description: 'Science Councillor Candidate' },
-                        { id: 'c11', name: 'Ivy Martinez', description: 'Science Councillor Candidate' },
-                        { id: 'c12', name: 'Jack Anderson', description: 'Science Councillor Candidate' },
-                    ],
-                },
-                {
-                    id: 'contest-4',
-                    title: 'Senate – At Large',
-                    instructionText: 'Select up to 4 candidates',
-                    ruleType: 'multi',
-                    required: true,
-                    maxSelections: 4,
-                    restrictionFaculty: null,
-                    candidates: [
-                        { id: 'c13', name: 'Karen Thompson', description: 'Senate Candidate' },
-                        { id: 'c14', name: 'Liam Garcia', description: 'Senate Candidate' },
-                        { id: 'c15', name: 'Mia Rodriguez', description: 'Senate Candidate' },
-                        { id: 'c16', name: 'Noah Lewis', description: 'Senate Candidate' },
-                        { id: 'c17', name: 'Olivia Walker', description: 'Senate Candidate' },
-                    ],
-                },
-            ]
-        });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch ballot details' });
-    }
-});
-
-// ─── VOTE SUBMISSION ─────────────────────────────────────────────────────────
-
-app.post('/api/ballots/:ballotId/submit', authMiddleware, requireRole('student'), async (req, res) => {
-    const { ballotId } = req.params;
-    const { selections } = req.body;
-
-    if (!selections || Object.keys(selections).length === 0) {
-        return res.status(400).json({ error: 'No selections provided' });
-    }
-
-    try {
-        const user = await User.findById(req.userId);
-        if (!user) return res.status(401).json({ error: 'User not found' });
-
-        const studentNumber = user.studentNumber;
-        const electionId = ballotId;
-
-        const contestIds = Object.keys(selections);
-        const primaryContestId = contestIds[0];
-        const primarySelection = selections[primaryContestId];
-        const primaryCandidateId = Array.isArray(primarySelection)
-            ? primarySelection[0]
-            : primarySelection;
-
-        if (!primaryCandidateId) {
-            return res.status(400).json({ error: 'No candidate selected in primary contest' });
-        }
-
-        let verifiedUserId;
-        try {
-            verifiedUserId = await verifyVoterEligibility(studentNumber, electionId);
-        } catch (eligibilityErr) {
-            return res.status(403).json({ error: eligibilityErr.message });
-        }
-
-        let transactionId;
-        try {
-            const result = await submitVoteTransaction(electionId, studentNumber, primaryCandidateId);
-            transactionId = `bc-${Date.now()}-${result.substring(0, 8)}`;
-        } catch (blockchainErr) {
-            console.warn('Blockchain unavailable, using mock tx:', blockchainErr.message);
-            transactionId = `mock-tx-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-        }
-
-        await recordVoteReceipt(verifiedUserId, electionId, { selections }, transactionId);
-
-        res.json({
-            success: true,
-            transactionId,
-            message: 'Your vote has been recorded on the blockchain.',
-        });
-
-    } catch (err) {
-        console.error('Vote submission error:', err);
-        res.status(500).json({
-            error: 'Failed to submit ballot',
-            details: err.message,
-        });
-    }
-});
-
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5002;
 connectDB()
     .then(() => {
         console.log('✅ MongoDB connected!');
+        console.log(`🗄️ MongoDB database: ${mongoose.connection.name}`);
+        console.log(`🔗 Fabric mode: ${FABRIC_ENABLED ? 'enabled' : 'disabled'}`);
         app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
     })
     .catch(err => {

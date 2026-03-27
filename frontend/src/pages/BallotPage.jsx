@@ -37,17 +37,14 @@ const BallotPage = () => {
   const [rulesModalOpen, setRulesModalOpen] = useState(false)
   const [hasSeenRules, setHasSeenRules] = useState(false)
   const [confirmedSelection, setConfirmedSelection] = useState(false)
-  const [showDetails, setShowDetails] = useState(null) // Track which candidate's details are shown
   const navigate = useNavigate()
 
   useEffect(() => {
     if (ballotId) {
       fetchBallot()
-      // Show rules modal on first load
-      const seenRules = sessionStorage.getItem(`rules_seen_${ballotId}`)
-      if (!seenRules) {
-        setRulesModalOpen(true)
-      }
+      // Always show rules for every election visit.
+      setRulesModalOpen(true)
+      setHasSeenRules(false)
     }
   }, [ballotId])
 
@@ -77,11 +74,15 @@ const BallotPage = () => {
 
   const filterContests = () => {
     if (!ballot?.contests) return []
-    const userFaculty = getUserFaculty()
+    const normalizeFaculty = (value) =>
+      value ? String(value).trim().toUpperCase().replace(/\s+/g, '_') : null
+
+    const userFaculty = normalizeFaculty(getUserFaculty())
     
     return ballot.contests.filter((contest) => {
+      const contestRestriction = normalizeFaculty(contest.restrictionFaculty)
       // Show contest if no restriction OR user's faculty matches
-      return !contest.restrictionFaculty || contest.restrictionFaculty === userFaculty
+      return !contestRestriction || contestRestriction === userFaculty
     })
   }
 
@@ -117,10 +118,6 @@ const BallotPage = () => {
     return { valid: true }
   }
 
-  const handleToggleDetails = (candidateId) => {
-    setShowDetails(showDetails === candidateId ? null : candidateId)
-  }
-
   const handleSubmit = () => {
     if (!confirmedSelection) {
       setError('Please confirm your selection before submitting.')
@@ -137,9 +134,6 @@ const BallotPage = () => {
   const handleRulesProceed = () => {
     setRulesModalOpen(false)
     setHasSeenRules(true)
-    if (ballotId) {
-      sessionStorage.setItem(`rules_seen_${ballotId}`, 'true')
-    }
   }
 
   const handleConfirmSubmit = async () => {
@@ -270,8 +264,6 @@ const BallotPage = () => {
                     candidates={contest.candidates || []}
                     selections={selections}
                     onSelectionChange={handleSelectionChange}
-                    showDetails={showDetails}
-                    onToggleDetails={handleToggleDetails}
                   />
                   {index < visibleContests.length - 1 && (
                     <Divider sx={{ my: 4, borderColor: '#e0e0e0' }} />
@@ -327,7 +319,7 @@ const BallotPage = () => {
             size="large"
             fullWidth
             onClick={handleSubmit}
-            disabled={submitting || !confirmedSelection}
+            disabled={submitting || !confirmedSelection || !hasSeenRules}
             sx={{ mb: 2, py: 1.5, fontSize: '1rem', fontWeight: 600 }}
           >
             {submitting ? 'Submitting Ballot...' : 'SUBMIT'}
@@ -346,9 +338,10 @@ const BallotPage = () => {
 
       <VotingRulesModal
         open={rulesModalOpen}
-        onClose={() => setRulesModalOpen(false)}
+        onClose={() => {}}
         onProceed={handleRulesProceed}
         ballotTitle={ballot?.title}
+        required
       />
 
       <Dialog 
@@ -377,9 +370,10 @@ const BallotPage = () => {
               const contestSelections = selections[contest.id] || []
               if (contestSelections.length === 0) return null
               
-              const selectedCandidates = contest.candidates.filter(c => 
-                contestSelections.includes(c.id)
-              )
+              const candidateMap = Object.fromEntries(contest.candidates.map(c => [c.id, c]))
+              const selectedCandidates = contest.ruleType === 'ranked'
+                ? contestSelections.map(id => candidateMap[id]).filter(Boolean)
+                : contest.candidates.filter(c => contestSelections.includes(c.id))
               
               return (
                 <Box key={contest.id} sx={{ mb: 1.5 }}>
@@ -388,9 +382,7 @@ const BallotPage = () => {
                   </Typography>
                   {contest.ruleType === 'ranked' ? (
                     <Typography variant="body2" sx={{ color: '#616161', ml: 2 }}>
-                      {selectedCandidates.map((c, idx) => 
-                        `${contestSelections.indexOf(c.id) + 1}. ${c.name}`
-                      ).join(', ')}
+                      {selectedCandidates.map((c, idx) => `${idx + 1}. ${c.name}`).join(', ')}
                     </Typography>
                   ) : (
                     <Typography variant="body2" sx={{ color: '#616161', ml: 2 }}>

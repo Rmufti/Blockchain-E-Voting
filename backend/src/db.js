@@ -2,13 +2,44 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
+const ROLE_VALUES = [
+  'student',
+  'candidate',
+  'admin',
+  'usc_admin',
+  'usc_president',
+  'usc_vp',
+  'faculty_president',
+  'councillor',
+  'meeting_chair',
+];
+
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   fullName: String,
   studentNumber: String,
   faculty: String,
-  role: { type: String, default: 'student' },
+  role: { type: String, enum: ROLE_VALUES, default: 'student' },
+  permissions: { type: [String], default: [] },
+  grantedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  grantedAt: { type: Date, default: null },
+  roleHistory: {
+    type: [
+      new mongoose.Schema(
+        {
+          from: { type: String, default: null },
+          to: { type: String, required: true },
+          by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+          reason: { type: String, default: '' },
+          timestamp: { type: Date, default: Date.now },
+          contextElectionId: { type: String, default: null },
+        },
+        { _id: false }
+      ),
+    ],
+    default: [],
+  },
   enrollment_status: { type: String, default: 'active' }
 });
 
@@ -29,8 +60,8 @@ const VoteReceipt = mongoose.model('VoteReceipt', voteReceiptSchema);
 async function connectDB() {
   const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGO_URI or MONGODB_URI not defined in .env');
-
-  return mongoose.connect(uri);
+  const dbName = process.env.MONGODB_DB_NAME || undefined;
+  return mongoose.connect(uri, dbName ? { dbName } : undefined);
 }
 
 // Create user

@@ -26,13 +26,16 @@ import IconStatsCard from '../components/IconStatsCard'
 import ActionCard from '../components/ActionCard'
 
 const StudentDashboardPage = () => {
-  const { user } = useAuth()
+  const { user, role } = useAuth()
   const [ballots, setBallots] = useState([])
   const [receipts, setReceipts] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const navigate = useNavigate()
+
+  const ADMIN_CAPABLE_ROLES = new Set(['admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'])
+  const canAccessAdmin = ADMIN_CAPABLE_ROLES.has(role)
 
   useEffect(() => {
     fetchData()
@@ -83,12 +86,30 @@ const StudentDashboardPage = () => {
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f5f5f5', py: 4 }}>
       <Container maxWidth="lg">
-        <Typography variant="h4" gutterBottom sx={{ mb: 1, color: '#4A148C', fontWeight: 600 }}>
-          Voter Dashboard
-        </Typography>
-        <Typography variant="body1" sx={{ mb: 4, color: '#616161' }}>
-          {user?.name || 'Student'} — view your ballots and voting history below.
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Box>
+            <Typography variant="h4" sx={{ mb: 1, color: '#4A148C', fontWeight: 600 }}>
+              Voter Dashboard
+            </Typography>
+            <Typography variant="body1" sx={{ color: '#616161' }}>
+              {user?.name || 'Student'} — view your ballots and voting history below.
+            </Typography>
+          </Box>
+          {canAccessAdmin && (
+            <Button
+              variant="contained"
+              onClick={() => navigate('/admin')}
+              sx={{
+                backgroundColor: '#1a237e',
+                textTransform: 'none',
+                whiteSpace: 'nowrap',
+                '&:hover': { backgroundColor: '#0d1254' },
+              }}
+            >
+              Go to Admin
+            </Button>
+          )}
+        </Box>
 
         {error && <ErrorAlert message={error} onClose={() => setError('')} />}
 

@@ -3,7 +3,41 @@ const { Gateway, Wallets } = require('fabric-network');
 const fs = require('fs');
 const path = require('path');
 
+const FABRIC_ENABLED = (process.env.FABRIC_ENABLED || 'true').toLowerCase() !== 'false';
+const FABRIC_RETRY_COOLDOWN_MS = Number(process.env.FABRIC_RETRY_COOLDOWN_MS || 30000);
+
+let fabricUnavailableUntil = 0;
+let lastFabricWarnAt = 0;
+
+function makeFabricUnavailableError(message) {
+    const err = new Error(message);
+    err.isFabricUnavailable = true;
+    return err;
+}
+
+function shouldAttemptFabricConnection() {
+    if (!FABRIC_ENABLED) {
+        throw makeFabricUnavailableError('Fabric integration disabled (FABRIC_ENABLED=false).');
+    }
+
+    if (Date.now() < fabricUnavailableUntil) {
+        throw makeFabricUnavailableError('Fabric temporarily unavailable; retry window active.');
+    }
+}
+
+function markFabricUnavailable(error) {
+    fabricUnavailableUntil = Date.now() + FABRIC_RETRY_COOLDOWN_MS;
+
+    // Throttle warning noise to at most once every 10 seconds.
+    if (Date.now() - lastFabricWarnAt > 10000) {
+        console.warn(`Fabric unavailable. Backing off for ${FABRIC_RETRY_COOLDOWN_MS}ms. Reason: ${error.message}`);
+        lastFabricWarnAt = Date.now();
+    }
+}
+
 async function getContract() {
+    shouldAttemptFabricConnection();
+
     const ccpPath = path.resolve(__dirname, '..', '..', 'connection-org1.json');
     const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
 
@@ -53,6 +87,9 @@ async function submitVoteTransaction(electionId, voterId, candidateId) {
         return txResult && txResult.length > 0 ? txResult.toString() : 'VoteRecorded';
 
     } catch (error) {
+        if (!error.isFabricUnavailable) {
+            markFabricUnavailable(error);
+        }
         console.error('Blockchain vote submission failed:', error.message);
         throw error;
     } finally {
@@ -78,6 +115,9 @@ async function initElection(electionId, electionName) {
         console.log(`Election ${electionId} initialized on blockchain.`);
         return true;
     } catch (error) {
+        if (!error.isFabricUnavailable) {
+            markFabricUnavailable(error);
+        }
         console.error('Failed to initialize election:', error.message);
         throw error;
     } finally {
@@ -100,6 +140,9 @@ async function queryResults(electionId) {
         const raw = await contract.evaluateTransaction('QueryResults', electionId);
         return JSON.parse(raw.toString());
     } catch (error) {
+        if (!error.isFabricUnavailable) {
+            markFabricUnavailable(error);
+        }
         console.error('Failed to query results:', error.message);
         throw error;
     } finally {
@@ -124,6 +167,9 @@ async function getElection(electionId) {
         console.log(`Successfully fetched election ${electionId} from blockchain.`);
         return JSON.parse(raw.toString());
     } catch (error) {
+        if (!error.isFabricUnavailable) {
+            markFabricUnavailable(error);
+        }
         console.error(`Failed to fetch election ${electionId}:`, error.message);
         throw error;
     } finally {

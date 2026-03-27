@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5002'
 
 // Create axios instance
 const api = axios.create({
@@ -103,7 +103,7 @@ export const apiService = {
 
   getCurrentElection: async () => {
     try {
-      const response = await api.get('/api/elections/current')
+      const response = await api.get('/api/elections/current-active')
       return response
     } catch (error) {
       throw { message: parseError(error), originalError: error }
@@ -148,7 +148,56 @@ export const apiService = {
   
   getAdminElections: async () => {
     try {
-      const response = await api.get('/api/elections')
+      const response = await api.get('/api/elections', { params: { scope: 'manage' } })
+      return response
+    } catch (error) {
+      throw { message: parseError(error), originalError: error }
+    }
+  },
+
+  updateElection: async (ballotId, updates) => {
+    try {
+      const response = await api.put(`/api/elections/${ballotId}`, updates)
+      return response
+    } catch (error) {
+      throw { message: parseError(error), originalError: error }
+    }
+  },
+
+  searchStudents: async (query, faculty = null) => {
+    try {
+      const params = { q: query }
+      if (faculty) params.faculty = faculty
+      const response = await api.get('/api/admin/students/search', { params })
+      return response
+    } catch (error) {
+      throw { message: parseError(error), originalError: error }
+    }
+  },
+
+  searchAllUsers: async (query) => {
+    try {
+      const response = await api.get('/api/admin/users/search', { params: { q: query } })
+      return response
+    } catch (error) {
+      throw { message: parseError(error), originalError: error }
+    }
+  },
+
+  delegateRole: async (targetUserId, targetRole, faculty = null) => {
+    try {
+      const body = { targetUserId, targetRole }
+      if (faculty) body.faculty = faculty
+      const response = await api.post('/api/admin/access/delegate', body)
+      return response
+    } catch (error) {
+      throw { message: parseError(error), originalError: error }
+    }
+  },
+
+  revokeRole: async (targetUserId) => {
+    try {
+      const response = await api.post('/api/admin/access/revoke', { targetUserId })
       return response
     } catch (error) {
       throw { message: parseError(error), originalError: error }

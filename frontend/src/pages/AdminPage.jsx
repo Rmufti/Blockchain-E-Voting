@@ -16,6 +16,7 @@ import {
   PersonAdd as PersonAddIcon,
   VerifiedUser as VerifiedUserIcon,
   Assessment as AssessmentIcon,
+  ManageAccounts as ManageAccountsIcon,
 } from '@mui/icons-material'
 import { apiService } from '../services/api'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -72,9 +73,23 @@ const AdminPage = () => {
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f5f5f5', py: 4 }}>
       <Container maxWidth="lg">
-        <Typography variant="h4" gutterBottom sx={{ color: '#4A148C', mb: 4, fontWeight: 600 }}>
-          Admin Dashboard
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Typography variant="h4" sx={{ color: '#4A148C', fontWeight: 600 }}>
+            Admin Dashboard
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={() => navigate('/vote')}
+            sx={{
+              backgroundColor: '#4A148C',
+              textTransform: 'none',
+              whiteSpace: 'nowrap',
+              '&:hover': { backgroundColor: '#38006b' },
+            }}
+          >
+            Go to Voter
+          </Button>
+        </Box>
 
         {error && <ErrorAlert message={error} onClose={() => setError('')} />}
 
@@ -118,6 +133,14 @@ const AdminPage = () => {
               title="Manage Elections"
               description="Set up new elections and manage existing ones"
               onClick={() => navigate('/admin/elections')}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <ActionCard
+              icon={<ManageAccountsIcon />}
+              title="Manage Users"
+              description="Assign and change roles for any user"
+              onClick={() => navigate('/admin/users')}
             />
           </Grid>
           <Grid item xs={12} sm={6} md={4}>

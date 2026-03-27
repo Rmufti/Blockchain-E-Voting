@@ -21,7 +21,6 @@ import LoadingSpinner from '../components/LoadingSpinner'
 const LoginPage = () => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [userType, setUserType] = useState('voter')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
@@ -36,7 +35,7 @@ const LoginPage = () => {
     setLoading(true)
 
     try {
-      const response = await apiService.login(email, password, userType)
+      const response = await apiService.login(email, password)
       
       if (response.data.error) {
         setError(response.data.error)
@@ -45,18 +44,12 @@ const LoginPage = () => {
       }
 
       const { token, user, role } = response.data
-      
-      // Verify user type matches selection
-      if ((userType === 'admin' && role !== 'admin') || (userType === 'voter' && role === 'admin')) {
-        setError('Wrong user type for this account.')
-        setLoading(false)
-        return
-      }
 
       login(token, user, role)
 
       // Redirect based on role
-      const redirectPath = from || (role === 'admin' ? '/admin' : '/vote')
+      const STUDENT_ONLY_ROLES = ['student', 'candidate']
+      const redirectPath = from || (STUDENT_ONLY_ROLES.includes(role) ? '/vote' : '/choose')
       navigate(redirectPath, { replace: true })
     } catch (err) {
       setError(err.message || 'Login failed.')
@@ -143,29 +136,6 @@ const LoginPage = () => {
               disabled={loading}
             />
             
-            <FormControl component="fieldset" sx={{ mt: 2, width: '100%' }}>
-              <FormLabel component="legend" sx={{ color: '#1a1a1a', mb: 1 }}>
-                User Type
-              </FormLabel>
-              <RadioGroup
-                row
-                value={userType}
-                onChange={(e) => setUserType(e.target.value)}
-                sx={{ justifyContent: 'center' }}
-              >
-                <FormControlLabel 
-                  value="voter" 
-                  control={<Radio sx={{ color: '#4A148C', '&.Mui-checked': { color: '#4A148C' } }} />} 
-                  label="Voter" 
-                />
-                <FormControlLabel 
-                  value="admin" 
-                  control={<Radio sx={{ color: '#4A148C', '&.Mui-checked': { color: '#4A148C' } }} />} 
-                  label="Admin" 
-                />
-              </RadioGroup>
-            </FormControl>
-
             <Button
               type="submit"
               fullWidth

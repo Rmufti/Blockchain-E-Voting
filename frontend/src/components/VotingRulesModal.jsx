@@ -14,7 +14,7 @@ import {
   ListItemText,
 } from '@mui/material'
 
-const VotingRulesModal = ({ open, onClose, onProceed, ballotTitle }) => {
+const VotingRulesModal = ({ open, onClose, onProceed, ballotTitle, required = false }) => {
   const [agreed, setAgreed] = useState(false)
 
   const handleProceed = () => {
@@ -27,7 +27,8 @@ const VotingRulesModal = ({ open, onClose, onProceed, ballotTitle }) => {
   return (
     <Dialog 
       open={open} 
-      onClose={onClose}
+      onClose={required ? undefined : onClose}
+      disableEscapeKeyDown={required}
       maxWidth="md"
       fullWidth
       PaperProps={{
@@ -133,9 +134,11 @@ const VotingRulesModal = ({ open, onClose, onProceed, ballotTitle }) => {
         />
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 3 }}>
-        <Button onClick={onClose} variant="outlined" sx={{ textTransform: 'none' }}>
-          Cancel
-        </Button>
+        {!required && (
+          <Button onClick={onClose} variant="outlined" sx={{ textTransform: 'none' }}>
+            Cancel
+          </Button>
+        )}
         <Button 
           onClick={handleProceed} 
           variant="contained"

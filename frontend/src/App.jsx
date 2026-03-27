@@ -8,6 +8,8 @@ import ConfirmationPage from './pages/ConfirmationPage'
 import AdminPage from './pages/AdminPage'
 import ResultsPage from './pages/ResultsPage'
 import ElectionsManagementPage from './pages/ElectionsManagementPage'
+import UserManagementPage from './pages/UserManagementPage'
+import RoleSelectPage from './pages/RoleSelectPage'
 import ProfilePage from './pages/ProfilePage'
 import ContactPage from './pages/ContactPage'
 import { AppBar, Toolbar, Typography, Button, Box, Tabs, Tab } from '@mui/material'
@@ -17,6 +19,9 @@ function App() {
   const { isAuthenticated, role, logout, loading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const ADMIN_ROLES = ['admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president']
+  const VOTER_ROLES = ['student', 'candidate', 'faculty_president', 'councillor', 'meeting_chair', 'usc_president', 'usc_vp', 'admin', 'usc_admin']
+  const isAdminRole = ADMIN_ROLES.includes(role)
   
   // Show loading state while auth is initializing
   if (loading) {
@@ -33,7 +38,7 @@ function App() {
   }
 
   const getTabValue = () => {
-    if (role === 'admin') {
+    if (isAdminRole) {
       if (location.pathname.startsWith('/admin/elections')) {
         return 1
       } else if (location.pathname.startsWith('/admin') || location.pathname.startsWith('/results')) {
@@ -56,7 +61,7 @@ function App() {
   }
 
   const handleTabChange = (event, newValue) => {
-    if (role === 'admin') {
+    if (isAdminRole) {
       if (newValue === 0) {
         navigate('/admin')
       } else if (newValue === 1) {
@@ -121,7 +126,7 @@ function App() {
                     },
                   }}
                 >
-                  {role === 'admin' ? (
+                  {isAdminRole ? (
                     <>
                       <Tab label="Dashboard" />
                       <Tab label="Elections" />
@@ -136,7 +141,7 @@ function App() {
                   )}
                 </Tabs>
               )}
-              {role === 'student' && (
+              {VOTER_ROLES.includes(role) && (
                 <Button
                   variant="contained"
                   onClick={() => navigate('/vote')}
@@ -152,7 +157,7 @@ function App() {
             </Box>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', ml: 2 }}>
               <Typography variant="body2" sx={{ color: '#616161' }}>
-                {role === 'admin' ? 'Administrator' : 'Student'}
+                {isAdminRole ? 'Administrator' : 'Voter'}
               </Typography>
               <Button 
                 onClick={handleLogout}
@@ -180,7 +185,7 @@ function App() {
           element={
             isAuthenticated ? (
               <Navigate
-                to={role === 'admin' ? '/admin' : '/vote'}
+                to={isAdminRole ? '/admin' : '/vote'}
                 replace
               />
             ) : (
@@ -189,9 +194,17 @@ function App() {
           }
         />
         <Route
+          path="/choose"
+          element={
+            <ProtectedRoute allowedRoles={[...ADMIN_ROLES, 'student', 'candidate', 'councillor', 'meeting_chair']}>
+              <RoleSelectPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/vote"
           element={
-            <ProtectedRoute allowedRoles={['student']}>
+            <ProtectedRoute allowedRoles={VOTER_ROLES}>
               <StudentDashboardPage />
             </ProtectedRoute>
           }
@@ -199,7 +212,7 @@ function App() {
         <Route
           path="/vote/:ballotId"
           element={
-            <ProtectedRoute allowedRoles={['student']}>
+            <ProtectedRoute allowedRoles={VOTER_ROLES}>
               <BallotPage />
             </ProtectedRoute>
           }
@@ -207,7 +220,7 @@ function App() {
         <Route
           path="/confirm/:ballotId"
           element={
-            <ProtectedRoute allowedRoles={['student']}>
+            <ProtectedRoute allowedRoles={VOTER_ROLES}>
               <ConfirmationPage />
             </ProtectedRoute>
           }
@@ -215,7 +228,7 @@ function App() {
         <Route
           path="/confirm"
           element={
-            <ProtectedRoute allowedRoles={['student']}>
+            <ProtectedRoute allowedRoles={VOTER_ROLES}>
               <ConfirmationPage />
             </ProtectedRoute>
           }
@@ -223,7 +236,7 @@ function App() {
         <Route
           path="/admin"
           element={
-            <ProtectedRoute allowedRoles={['admin']}>
+            <ProtectedRoute allowedRoles={ADMIN_ROLES}>
               <AdminPage />
             </ProtectedRoute>
           }
@@ -231,8 +244,16 @@ function App() {
         <Route
           path="/admin/elections"
           element={
-            <ProtectedRoute allowedRoles={['admin']}>
+            <ProtectedRoute allowedRoles={ADMIN_ROLES}>
               <ElectionsManagementPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <ProtectedRoute allowedRoles={['admin', 'faculty_president']}>
+              <UserManagementPage />
             </ProtectedRoute>
           }
         />
