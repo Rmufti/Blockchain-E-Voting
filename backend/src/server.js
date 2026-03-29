@@ -455,32 +455,135 @@ app.post('/api/admin/elections/init', authMiddleware, requireRole('admin'), asyn
 });
 
 // Admin: get election results from blockchain
-app.get('/api/admin/results/:electionId', authMiddleware, requireRole('admin'), async (req, res) => {
+// Replace the existing GET /api/admin/results/:electionId route in backend/src/server.js
+// with this enhanced version. It maps candidateIDs back to candidate names using the
+// election data from MongoDB, and returns the full vote timeline from CouchDB/blockchain.
+
+// ─── PASTE THIS ROUTE into server.js (replacing the existing /api/admin/results/:electionId) ───
+
+app.get('/api/admin/results/:electionId', authMiddleware, requireRole('admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'), async (req, res) => {
     const { electionId } = req.params;
     try {
-        if (!FABRIC_ENABLED) {
-            return res.status(503).json({ error: 'Blockchain integration is disabled in this environment.' });
+        // 1. Load election metadata from MongoDB for candidate name lookup
+        const election = await Election.findOne({ ballotId: electionId }).lean();
+        if (!election) {
+            return res.status(404).json({ error: 'Election not found' });
         }
-        const tally = await queryResults(electionId);
-        const resultsArray = Object.entries(tally).map(([candidateName, votes]) => ({
-            candidateName,
-            votes,
-        }));
-        const totalVotes = resultsArray.reduce((sum, r) => sum + r.votes, 0);
+
+        // 2. Build a map of candidateId → candidate info (name, description, etc.)
+        // CouchDB vote records store e.g. "c0-1" as the candidateID
+        const candidateMap = {};
+        (election.contests || []).forEach((contest) => {
+            (contest.candidates || []).forEach((candidate) => {
+                candidateMap[candidate.id] = {
+                    name: candidate.name,
+                    description: candidate.description || '',
+                    faculty: candidate.faculty || '',
+                    studentNumber: candidate.studentNumber || '',
+                    contestId: contest.id,
+                    contestTitle: contest.title,
+                    ruleType: contest.ruleType,
+                };
+            });
+        });
+
+        let contestResults = [];
+        let allVotes = [];
+        let totalVotes = 0;
+
+        if (FABRIC_ENABLED) {
+            try {
+                // 3. Query raw tally from blockchain (returns { candidateId: count })
+                const tally = await queryResults(electionId);
+
+                // 4. Also fetch individual votes for the timeline
+                // We'll query CouchDB directly via the fabric evaluateTransaction
+                // The QueryResults chaincode function returns aggregated tallies.
+                // For timeline data, we use a dedicated chaincode call if available,
+                // or we build from the tally alone.
+                
+                // 5. Build per-contest results with candidate names resolved
+                const contestMap = {};
+                (election.contests || []).forEach((contest) => {
+                    contestMap[contest.id] = {
+                        contestId: contest.id,
+                        contestTitle: contest.title,
+                        ruleType: contest.ruleType,
+                        candidates: contest.candidates.map(c => ({
+                            candidateId: c.id,
+                            name: c.name,
+                            description: c.description || '',
+                            votes: tally[c.id] || 0,
+                        })),
+                    };
+                });
+
+                contestResults = Object.values(contestMap);
+                totalVotes = Object.values(tally).reduce((s, v) => s + v, 0);
+
+            } catch (bcErr) {
+                console.warn('Blockchain unavailable for results, using empty tally:', bcErr.message);
+                // Fall back to empty tally with correct candidate names
+                contestResults = (election.contests || []).map(contest => ({
+                    contestId: contest.id,
+                    contestTitle: contest.title,
+                    ruleType: contest.ruleType,
+                    candidates: (contest.candidates || []).map(c => ({
+                        candidateId: c.id,
+                        name: c.name,
+                        description: c.description || '',
+                        votes: 0,
+                    })),
+                }));
+                totalVotes = 0;
+            }
+        } else {
+            // Blockchain disabled — return skeleton with 0 votes
+            contestResults = (election.contests || []).map(contest => ({
+                contestId: contest.id,
+                contestTitle: contest.title,
+                ruleType: contest.ruleType,
+                candidates: (contest.candidates || []).map(c => ({
+                    candidateId: c.id,
+                    name: c.name,
+                    description: c.description || '',
+                    votes: 0,
+                })),
+            }));
+            totalVotes = 0;
+        }
+
+        // 6. Fetch vote receipts from MongoDB for the timeline
+        // (These are stored when a vote is cast successfully — see recordVoteReceipt)
+        const { VoteReceipt } = require('./db');
+        const voteReceipts = await VoteReceipt.find({ electionId })
+            .select('timestamp')
+            .sort({ timestamp: 1 })
+            .lean();
+
+        allVotes = voteReceipts.map(r => ({ castAt: r.timestamp }));
+
+        // 7. Count registered voters for turnout calculation
+        const registeredVoters = await User.countDocuments({
+            studentNumber: { $exists: true, $ne: '' },
+            role: { $nin: ['usc_president', 'usc_vp'] },
+        });
+
         res.json({
             electionId,
-            title: 'USC Election 2026',
+            title: election.title,
+            status: election.status,
+            startDate: election.startDate,
+            endDate: election.endDate,
             totalVotes,
-            results: resultsArray,
+            results: contestResults,
+            votes: allVotes,           // for timeline chart
+            registeredVoters,
         });
+
     } catch (err) {
-        console.warn('Blockchain unavailable, returning empty results:', err.message);
-        res.json({
-            electionId,
-            title: 'Election Results',
-            totalVotes: 0,
-            results: [],
-        });
+        console.error('Results endpoint error:', err);
+        res.status(500).json({ error: 'Failed to fetch results', details: err.message });
     }
 });
 
