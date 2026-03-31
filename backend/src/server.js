@@ -44,6 +44,17 @@ function normalizeFaculty(value) {
     return value ? String(value).trim().toUpperCase().replace(/\s+/g, '_') : null;
 }
 
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function buildFacultyRegex(value) {
+    const normalized = normalizeFaculty(value);
+    if (!normalized) return null;
+    const tokens = normalized.split('_').filter(Boolean).map((part) => escapeRegex(part));
+    if (tokens.length === 0) return null;
+    const tokenSequence = tokens.join('[\\s_-]+');
+    return new RegExp(`(^|[\\s_-])${tokenSequence}($|[\\s_-])`, 'i');
+}
+
 async function getElectionIdsForUser({ role, faculty, status = null, scope = 'view' }) {
     const query = status ? { status } : {};
     const elections = await Election.find(query)
@@ -151,6 +162,13 @@ async function assignUserRole({ actor, targetUserId, targetRole, reason = '', co
     if (!targetUser) {
         const err = new Error('Target user not found');
         err.status = 404;
+        throw err;
+    }
+
+    // Only super admins can modify any user who currently holds an admin-level role.
+    if (ADMIN_RELATED_ROLES.has(normalizeRole(targetUser.role)) && !ADMIN_SUPER_ROLES.has(normalizeRole(actor.role))) {
+        const err = new Error('Only super admins can change the role of an admin-level user.');
+        err.status = 403;
         throw err;
     }
 
@@ -590,7 +608,6 @@ app.get('/api/admin/results/:electionId', authMiddleware, requireRole('admin', '
 // Admin: search ALL users (super-admin only)
 app.get('/api/admin/users/search', authMiddleware, requireRole('admin', 'faculty_president'), async (req, res) => {
     const { q } = req.query;
-    const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     try {
         const actor = await getActorUser(req);
         const term = (q || '').trim();
@@ -606,8 +623,8 @@ app.get('/api/admin/users/search', authMiddleware, requireRole('admin', 'faculty
         
         // Faculty presidents can only search users in their faculty
         if (actor.role && normalizeRole(actor.role) === 'faculty_president') {
-            const fp = normalizeFaculty(actor.faculty);
-            filter.faculty = fp ? { $regex: new RegExp(`^${escapeRegex(fp)}$`, 'i') } : { $exists: false };
+            const facultyRegex = buildFacultyRegex(actor.faculty);
+            filter.faculty = facultyRegex ? { $regex: facultyRegex } : { $exists: false };
         }
         
         const users = await User.find(filter)
@@ -625,18 +642,6 @@ app.get('/api/admin/users/search', authMiddleware, requireRole('admin', 'faculty
 // Admin: search students (by name, email, or studentNumber)
 app.get('/api/admin/students/search', authMiddleware, requireRole('admin', 'usc_admin', 'usc_president', 'usc_vp', 'faculty_president'), async (req, res) => {
     const { q, faculty } = req.query;
-
-    const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const buildFacultyRegex = (value) => {
-        const normalized = normalizeFaculty(value);
-        if (!normalized) return null;
-
-        const tokens = normalized.split('_').filter(Boolean).map((part) => escapeRegex(part));
-        if (tokens.length === 0) return null;
-
-        const tokenSequence = tokens.join('[\\s_-]+');
-        return new RegExp(`(^|[\\s_-])${tokenSequence}($|[\\s_-])`, 'i');
-    };
 
     try {
         const term = (q || '').trim();
