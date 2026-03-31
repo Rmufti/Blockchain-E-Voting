@@ -606,7 +606,8 @@ app.get('/api/admin/users/search', authMiddleware, requireRole('admin', 'faculty
         
         // Faculty presidents can only search users in their faculty
         if (actor.role && normalizeRole(actor.role) === 'faculty_president') {
-            filter.faculty = normalizeFaculty(actor.faculty);
+            const fp = normalizeFaculty(actor.faculty);
+            filter.faculty = fp ? { $regex: new RegExp(`^${escapeRegex(fp)}$`, 'i') } : { $exists: false };
         }
         
         const users = await User.find(filter)
