@@ -2,6 +2,14 @@
 
 How to run: see [HOW-TO-RUN.md](HOW-TO-RUN.md) for frontend, backend, blockchain, and database.
 
+Click link: blockchain-e-voting-omega.vercel.app
+
+* if error, go to site settings on chrome
+  1. click site settings
+  2. scroll down to Insecure Content
+  3. Click allow
+  4. Refresh page
+
 ---
 
 Organizations (MSPs)
